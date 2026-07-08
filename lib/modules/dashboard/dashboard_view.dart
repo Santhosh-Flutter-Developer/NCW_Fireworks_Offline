@@ -115,7 +115,7 @@ class DashboardView extends GetView<DashboardController> {
       physics: const NeverScrollableScrollPhysics(),
       mainAxisSpacing: 14,
       crossAxisSpacing: 14,
-      childAspectRatio: cols == 2 ? 1.35 : 1.2,
+      childAspectRatio: cols == 2 ? 1.1 : 1.2,
       children: stats,
     );
   }
@@ -242,6 +242,8 @@ class DashboardView extends GetView<DashboardController> {
                   children: List.generate(entries.length, (i) {
                     return Row(
                       mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      mainAxisAlignment: MainAxisAlignment.start,
                       children: [
                         Container(
                           width: 10,
@@ -252,9 +254,11 @@ class DashboardView extends GetView<DashboardController> {
                           ),
                         ),
                         const SizedBox(width: 6),
-                        Text(
-                          '${entries[i].key} (${entries[i].value})',
-                          style: AppTextStyles.caption,
+                        Expanded(
+                          child: Text(
+                            '${entries[i].key} (${entries[i].value})',
+                            style: AppTextStyles.caption,
+                          ),
                         ),
                       ],
                     );

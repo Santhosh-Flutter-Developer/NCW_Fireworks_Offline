@@ -43,20 +43,21 @@ class PartyListView extends GetView<PartyController> {
                   tooltip: 'Export',
                   onTap: () => _showComingSoon(context, 'Export'),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 5),
                 _actionIcon(
                   icon: Icons.print_rounded,
                   color: AppColors.skyBlue,
                   tooltip: 'Print',
                   onTap: () => _showComingSoon(context, 'Print'),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 5),
                 _actionIcon(
                   icon: Icons.download_rounded,
                   color: AppColors.skyBlue,
                   tooltip: 'Download',
                   onTap: () => _showComingSoon(context, 'Download'),
                 ),
+                const SizedBox(width: 5),
                 Obx(
                   () => ViewModeToggle(
                     isTableView: controller.isTableView.value,
@@ -90,8 +91,8 @@ class PartyListView extends GetView<PartyController> {
                     subtitle: 'Try a different search or add a new party.',
                   );
                 }
-                final startIndex = (controller.pageNo.value - 1) *
-                    controller.pageLimit.value;
+                final startIndex =
+                    (controller.pageNo.value - 1) * controller.pageLimit.value;
                 if (controller.isTableView.value) {
                   return SingleChildScrollView(
                     child: AppDataTable(

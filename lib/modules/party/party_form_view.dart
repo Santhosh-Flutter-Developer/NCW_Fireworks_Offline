@@ -84,7 +84,8 @@ class PartyFormView extends GetView<PartyController> {
               Obx(() => _dropdownField(
                     value: controller.formDistrict.value,
                     hint: 'Select',
-                    options: controller.districtOptions(controller.formState.value),
+                    options:
+                        controller.districtOptions(controller.formState.value),
                     onChanged: (v) {
                       controller.formDistrict.value = v;
                       controller.formCity.value = null;
@@ -98,9 +99,11 @@ class PartyFormView extends GetView<PartyController> {
                     hint: 'Select',
                     options: controller.formDistrict.value == null
                         ? []
-                        : controller.cityOptions(controller.formDistrict.value!),
+                        : controller
+                            .cityOptions(controller.formDistrict.value!),
                     onChanged: (v) => controller.formCity.value = v,
                   )),
+              const SizedBox(height: 16),
               _field(
                 'Pincode',
                 controller.pincodeCtrl,
@@ -145,7 +148,7 @@ class PartyFormView extends GetView<PartyController> {
                   Expanded(
                     flex: 2,
                     child: Padding(
-                      padding: const EdgeInsets.only(top: 8),
+                      padding: const EdgeInsets.only(top: 23),
                       child: Obx(() => _balanceTypeDropdown()),
                     ),
                   ),

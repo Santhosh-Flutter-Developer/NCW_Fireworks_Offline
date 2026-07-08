@@ -3,7 +3,6 @@ import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
-import '../../data/models/billing_item_model.dart';
 import '../../data/models/party_model.dart';
 import '../../data/models/product_model.dart';
 import '../../widgets/common_widgets.dart';

@@ -63,7 +63,7 @@ class AppTextStyles {
       );
 
   static TextStyle get statNumber => GoogleFonts.poppins(
-        fontSize: 26,
+        fontSize: 16,
         fontWeight: FontWeight.w700,
         color: AppColors.textPrimary,
       );

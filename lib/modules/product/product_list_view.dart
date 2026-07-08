@@ -35,28 +35,42 @@ class ProductListView extends GetView<ProductController> {
               onChanged: controller.setSearch,
             ),
             const SizedBox(height: 14),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              crossAxisAlignment: WrapCrossAlignment.center,
+            Row(
               children: [
-                _toolbarButton(
-                  icon: Icons.cloud_upload_rounded,
-                  label: 'Stock Upload',
-                  color: AppColors.skyBlue,
-                  onTap: () => _showComingSoon('Stock upload'),
+                Expanded(
+                  child: _toolbarButton(
+                    icon: Icons.cloud_upload_rounded,
+                    label: 'Stock Upload',
+                    color: AppColors.skyBlue,
+                    onTap: () => _showComingSoon('Stock upload'),
+                  ),
                 ),
-                _toolbarButton(
-                  icon: Icons.inventory_2_rounded,
-                  label: 'Product Upload',
-                  color: AppColors.skyBlue,
-                  onTap: () => _showComingSoon('Bulk product upload'),
+                const SizedBox(
+                  width: 10.0,
                 ),
+                Expanded(
+                  child: _toolbarButton(
+                    icon: Icons.inventory_2_rounded,
+                    label: 'Product Upload',
+                    color: AppColors.skyBlue,
+                    onTap: () => _showComingSoon('Bulk product upload'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(
+              height: 6.0,
+            ),
+            Row(
+              children: [
                 _actionIcon(
                   icon: Icons.download_rounded,
                   color: AppColors.success,
                   tooltip: 'Download',
                   onTap: () => _showComingSoon('Download'),
+                ),
+                const SizedBox(
+                  width: 10.0,
                 ),
                 Obx(
                   () => ViewModeToggle(
@@ -64,6 +78,7 @@ class ProductListView extends GetView<ProductController> {
                     onChanged: controller.toggleViewMode,
                   ),
                 ),
+                const Spacer(),
                 ElevatedButton.icon(
                   onPressed: () {
                     controller.startCreate();
@@ -300,8 +315,11 @@ class ProductListView extends GetView<ProductController> {
         foregroundColor: Colors.white,
         padding: const EdgeInsets.symmetric(horizontal: 14),
       ),
-      icon: Icon(icon, size: 17),
-      label: Text(label),
+      icon: Icon(icon, size: 14),
+      label: Text(
+        label,
+        style: const TextStyle(fontSize: 14.0),
+      ),
     );
   }
 
@@ -711,8 +729,7 @@ class _ProductPriceSheet extends GetView<ProductController> {
           hint: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Text('Select',
-                style:
-                    AppTextStyles.body.copyWith(color: AppColors.textMuted)),
+                style: AppTextStyles.body.copyWith(color: AppColors.textMuted)),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 12),
           dropdownColor: AppColors.surfaceElevated,
