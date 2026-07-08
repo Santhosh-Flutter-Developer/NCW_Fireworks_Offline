@@ -21,6 +21,10 @@ class StatusBadge extends StatelessWidget {
         return AppColors.ember;
       case DocStatus.converted:
         return AppColors.gold;
+      case DocStatus.active:
+        return AppColors.success;
+      case DocStatus.cancelled:
+        return AppColors.danger;
     }
   }
 

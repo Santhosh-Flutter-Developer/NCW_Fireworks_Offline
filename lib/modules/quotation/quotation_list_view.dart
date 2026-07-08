@@ -4,7 +4,6 @@ import 'package:intl/intl.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/utils/responsive.dart';
-import '../../data/models/billing_item_model.dart';
 import '../../data/models/quotation_model.dart';
 import '../../routes/app_routes.dart';
 import '../../widgets/app_data_table.dart';
@@ -15,6 +14,8 @@ import 'quotation_controller.dart';
 
 class QuotationListView extends GetView<QuotationController> {
   const QuotationListView({super.key});
+
+  static final _df = DateFormat('dd-MM-yyyy');
 
   @override
   Widget build(BuildContext context) {
@@ -29,9 +30,9 @@ class QuotationListView extends GetView<QuotationController> {
         backgroundColor: AppColors.gold,
         foregroundColor: AppColors.textOnGold,
         icon: const Icon(Icons.add_rounded),
-        label: const Text('New Quotation'),
+        label: const Text('Add'),
       ),
-      body: Padding(
+      body: SingleChildScrollView(
         padding: EdgeInsets.symmetric(
           horizontal: Responsive.horizontalPadding(context),
           vertical: 16,
@@ -39,125 +40,174 @@ class QuotationListView extends GetView<QuotationController> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SearchField(
-              hint: 'Search by number or party',
-              onChanged: controller.setSearch,
-            ),
+            _FilterBar(controller: controller, df: _df),
             const SizedBox(height: 14),
-            Obx(
-              () => SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: DocStatus.values.map((s) {
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: FilterChipToggle(
-                        label: s.label,
-                        selected: controller.filterStatus.value == s,
-                        onTap: () => controller.setStatusFilter(s),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Align(
-              alignment: Alignment.centerRight,
-              child: Obx(
-                () => ViewModeToggle(
+            Obx(() => _TabBar(
+                  active: controller.activeTab.value,
+                  onChanged: controller.setTab,
+                )),
+            const SizedBox(height: 14),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _PageSizeSelector(controller: controller),
+                ViewModeToggle(
                   isTableView: controller.isTableView.value,
                   onChanged: controller.toggleViewMode,
                 ),
-              ),
+              ],
             ),
             const SizedBox(height: 12),
-            Expanded(
-              child: Obx(() {
-                final list = controller.filtered;
-                if (list.isEmpty) {
-                  return const EmptyState(
+            Obx(() {
+              final list = controller.pagedFiltered;
+              if (list.isEmpty) {
+                return const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 40),
+                  child: EmptyState(
                     icon: Icons.request_quote_rounded,
                     title: 'No quotations found',
                     subtitle: 'Create a new quotation to get started.',
-                  );
-                }
-                final df = DateFormat('dd MMM yyyy');
-                if (controller.isTableView.value) {
-                  return SingleChildScrollView(
-                    child: AppDataTable(
-                      columns: const [
-                        'S.No',
-                        'Quotation No',
-                        'Party',
-                        'Date',
-                        'Valid Till',
-                        'Status',
-                        'Total',
-                        'Action',
-                      ],
-                      rows: List.generate(list.length, (i) {
-                        final q = list[i];
-                        return [
-                          Text('${i + 1}', style: AppTextStyles.body),
-                          Text(q.quotationNo, style: AppTextStyles.bodyStrong),
-                          SizedBox(
-                            width: 160,
-                            child: Text(q.partyName,
-                                style: AppTextStyles.body,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis),
-                          ),
-                          Text(df.format(q.date), style: AppTextStyles.body),
-                          Text(df.format(q.validTill), style: AppTextStyles.body),
-                          StatusBadge(status: q.status),
-                          Text('₹${q.total.toStringAsFixed(0)}',
-                              style: AppTextStyles.bodyStrong
-                                  .copyWith(color: AppColors.gold)),
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                tooltip: 'Edit',
-                                visualDensity: VisualDensity.compact,
-                                onPressed: () {
-                                  controller.startEdit(q);
-                                  Get.toNamed(AppRoutes.quotationForm);
-                                },
-                                icon: Icon(Icons.edit_rounded,
-                                    color: AppColors.teal, size: 18),
-                              ),
-                              IconButton(
-                                tooltip: 'Delete',
-                                visualDensity: VisualDensity.compact,
-                                onPressed: () => controller.deleteQuotation(q),
-                                icon: Icon(Icons.delete_outline_rounded,
-                                    color: AppColors.danger, size: 18),
-                              ),
-                            ],
-                          ),
-                        ];
-                      }),
-                    ),
-                  );
-                }
-                return ListView.separated(
-                  padding: const EdgeInsets.only(bottom: 90),
-                  itemCount: list.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
-                  itemBuilder: (context, index) {
-                    final q = list[index];
-                    return _QuotationTile(
-                      quotation: q,
-                      onTap: () {
-                        controller.startEdit(q);
-                        Get.toNamed(AppRoutes.quotationForm);
-                      },
-                      onDelete: () => controller.deleteQuotation(q),
-                    );
-                  },
+                  ),
                 );
-              }),
+              }
+              return controller.isTableView.value
+                  ? _QuotationTable(list: list, controller: controller)
+                  : Column(
+                      children: List.generate(list.length, (i) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: _QuotationTile(
+                            quotation: list[i],
+                            controller: controller,
+                          ),
+                        );
+                      }),
+                    );
+            }),
+            const SizedBox(height: 14),
+            _Pager(controller: controller),
+            const SizedBox(height: 90),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Filters: From Date / To Date / Bill No. search / Agent / Party
+// ---------------------------------------------------------------------------
+
+class _FilterBar extends StatelessWidget {
+  final QuotationController controller;
+  final DateFormat df;
+  const _FilterBar({required this.controller, required this.df});
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: [
+        SizedBox(
+          width: 160,
+          child: Obx(() => _DateField(
+                label: 'From Date',
+                date: controller.filterFrom.value,
+                df: df,
+                onTap: () => _pickDate(context, controller.filterFrom.value,
+                    controller.setDateFrom),
+              )),
+        ),
+        SizedBox(
+          width: 160,
+          child: Obx(() => _DateField(
+                label: 'To Date',
+                date: controller.filterTo.value,
+                df: df,
+                onTap: () => _pickDate(
+                    context, controller.filterTo.value, controller.setDateTo),
+              )),
+        ),
+        SizedBox(
+          width: 200,
+          child: SearchField(
+            hint: 'Bill No. Search',
+            onChanged: controller.setSearch,
+          ),
+        ),
+        SizedBox(
+          width: 180,
+          child: Obx(() => _DropdownField(
+                label: 'Agent',
+                value: controller.filterAgent.value,
+                items: controller.agents,
+                onChanged: controller.setAgentFilter,
+              )),
+        ),
+        SizedBox(
+          width: 200,
+          child: Obx(() => _DropdownField(
+                label: 'Party',
+                value: controller.filterParty.value,
+                items: controller.parties.map((p) => p.name).toList(),
+                onChanged: controller.setPartyFilter,
+              )),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _pickDate(BuildContext context, DateTime? current,
+      ValueChanged<DateTime?> onPicked) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: current ?? DateTime.now(),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+    );
+    if (picked != null) onPicked(picked);
+  }
+}
+
+class _DateField extends StatelessWidget {
+  final String label;
+  final DateTime? date;
+  final DateFormat df;
+  final VoidCallback onTap;
+  const _DateField(
+      {required this.label,
+      required this.date,
+      required this.df,
+      required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceElevated,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.divider),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.calendar_today_rounded,
+                size: 14, color: AppColors.textMuted),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                date != null ? df.format(date!) : label,
+                style: AppTextStyles.body.copyWith(
+                  color: date != null
+                      ? AppColors.textPrimary
+                      : AppColors.textMuted,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
         ),
@@ -166,26 +216,220 @@ class QuotationListView extends GetView<QuotationController> {
   }
 }
 
-class _QuotationTile extends StatelessWidget {
-  final QuotationModel quotation;
-  final VoidCallback onTap;
-  final VoidCallback onDelete;
-
-  const _QuotationTile({
-    required this.quotation,
-    required this.onTap,
-    required this.onDelete,
+class _DropdownField extends StatelessWidget {
+  final String label;
+  final String? value;
+  final List<String> items;
+  final ValueChanged<String?> onChanged;
+  const _DropdownField({
+    required this.label,
+    required this.value,
+    required this.items,
+    required this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
-    final df = DateFormat('dd MMM yyyy');
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceElevated,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.divider),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String?>(
+          isExpanded: true,
+          value: value,
+          hint: Text(label,
+              style: AppTextStyles.body.copyWith(color: AppColors.textMuted)),
+          icon: Icon(Icons.keyboard_arrow_down_rounded,
+              color: AppColors.textMuted),
+          style: AppTextStyles.body.copyWith(color: AppColors.textPrimary),
+          dropdownColor: AppColors.surfaceElevated,
+          items: [
+            DropdownMenuItem<String?>(
+              value: null,
+              child: Text('All $label${label.endsWith('s') ? '' : 's'}'),
+            ),
+            ...items.map(
+              (e) => DropdownMenuItem<String?>(value: e, child: Text(e)),
+            ),
+          ],
+          onChanged: onChanged,
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Active / Draft / Cancel tabs
+// ---------------------------------------------------------------------------
+
+class _TabBar extends StatelessWidget {
+  final QuotationTab active;
+  final ValueChanged<QuotationTab> onChanged;
+  const _TabBar({required this.active, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceElevated,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.divider),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: QuotationTab.values.map((tab) {
+          final selected = tab == active;
+          return InkWell(
+            borderRadius: BorderRadius.circular(9),
+            onTap: () => onChanged(tab),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
+              decoration: BoxDecoration(
+                gradient: selected ? AppColors.goldGradient : null,
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Text(
+                tab.label,
+                style: AppTextStyles.body.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color:
+                      selected ? AppColors.textOnGold : AppColors.textSecondary,
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Entries-per-page selector
+// ---------------------------------------------------------------------------
+
+class _PageSizeSelector extends StatelessWidget {
+  final QuotationController controller;
+  const _PageSizeSelector({required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: AppColors.surfaceElevated,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: AppColors.divider),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<int>(
+              value: controller.pageSize.value,
+              style: AppTextStyles.body.copyWith(color: AppColors.textPrimary),
+              dropdownColor: AppColors.surfaceElevated,
+              items: const [10, 25, 50, 100]
+                  .map((n) => DropdownMenuItem(value: n, child: Text('$n')))
+                  .toList(),
+              onChanged: (v) {
+                if (v != null) controller.setPageSize(v);
+              },
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text('entries per page', style: AppTextStyles.caption),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Table view
+// ---------------------------------------------------------------------------
+
+class _QuotationTable extends StatelessWidget {
+  final List<QuotationModel> list;
+  final QuotationController controller;
+  const _QuotationTable({required this.list, required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    final df = QuotationListView._df;
+    final startIndex =
+        (controller.currentPage.value - 1) * controller.pageSize.value;
+    return AppDataTable(
+      columns: const [
+        'S.No',
+        'Bill Date',
+        'Bill Number',
+        'Agent Name',
+        'Party Name',
+        'Bill Value',
+        'Bill Qty',
+        'Action',
+      ],
+      rows: List.generate(list.length, (i) {
+        final q = list[i];
+        return [
+          Text('${startIndex + i + 1}', style: AppTextStyles.body),
+          Text(df.format(q.date), style: AppTextStyles.body),
+          Text(q.quotationNo, style: AppTextStyles.bodyStrong),
+          Text(q.agentName, style: AppTextStyles.body),
+          SizedBox(
+            width: 160,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(q.partyName,
+                    style: AppTextStyles.bodyStrong,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
+                Text('Creator : NCW Fireworks Retail',
+                    style: AppTextStyles.caption),
+              ],
+            ),
+          ),
+          Text('₹${q.total.toStringAsFixed(2)}',
+              style: AppTextStyles.bodyStrong.copyWith(color: AppColors.gold)),
+          Text(q.qtyLabel, style: AppTextStyles.body),
+          _ActionIcons(quotation: q, controller: controller),
+        ];
+      }),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// List (card) view
+// ---------------------------------------------------------------------------
+
+class _QuotationTile extends StatelessWidget {
+  final QuotationModel quotation;
+  final QuotationController controller;
+  const _QuotationTile({required this.quotation, required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    final df = QuotationListView._df;
     return Material(
       color: AppColors.surface,
       borderRadius: BorderRadius.circular(18),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
-        onTap: onTap,
+        onTap: () {
+          controller.startEdit(quotation);
+          Get.toNamed(AppRoutes.quotationForm);
+        },
         child: Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
@@ -202,16 +446,13 @@ class _QuotationTile extends StatelessWidget {
                         style: AppTextStyles.bodyStrong),
                   ),
                   StatusBadge(status: quotation.status),
-                  IconButton(
-                    onPressed: onDelete,
-                    visualDensity: VisualDensity.compact,
-                    icon: Icon(Icons.delete_outline_rounded,
-                        color: AppColors.textMuted, size: 18),
-                  ),
                 ],
               ),
               const SizedBox(height: 4),
               Text(quotation.partyName, style: AppTextStyles.body),
+              const SizedBox(height: 2),
+              Text('Agent: ${quotation.agentName}',
+                  style: AppTextStyles.caption),
               const SizedBox(height: 10),
               Row(
                 children: [
@@ -220,21 +461,154 @@ class _QuotationTile extends StatelessWidget {
                   const SizedBox(width: 5),
                   Text(df.format(quotation.date), style: AppTextStyles.caption),
                   const SizedBox(width: 14),
-                  Icon(Icons.event_busy_rounded,
+                  Icon(Icons.inventory_2_outlined,
                       size: 13, color: AppColors.textMuted),
                   const SizedBox(width: 5),
-                  Text('Valid till ${df.format(quotation.validTill)}',
-                      style: AppTextStyles.caption),
+                  Text(quotation.qtyLabel, style: AppTextStyles.caption),
                   const Spacer(),
                   Text('₹${quotation.total.toStringAsFixed(0)}',
                       style: AppTextStyles.bodyStrong
                           .copyWith(color: AppColors.gold)),
                 ],
               ),
+              const Divider(height: 20),
+              Align(
+                alignment: Alignment.centerRight,
+                child:
+                    _ActionIcons(quotation: quotation, controller: controller),
+              ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Row/card actions: print, download, convert, edit, delete
+// ---------------------------------------------------------------------------
+
+class _ActionIcons extends StatelessWidget {
+  final QuotationModel quotation;
+  final QuotationController controller;
+  const _ActionIcons({required this.quotation, required this.controller});
+
+  void _notReady(String action) {
+    Get.snackbar(action, 'Coming soon', snackPosition: SnackPosition.BOTTOM);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          tooltip: 'Print',
+          visualDensity: VisualDensity.compact,
+          onPressed: () => _notReady('Print'),
+          icon: Icon(Icons.print_rounded, color: AppColors.ember, size: 18),
+        ),
+        IconButton(
+          tooltip: 'Download',
+          visualDensity: VisualDensity.compact,
+          onPressed: () => _notReady('Download'),
+          icon: Icon(Icons.file_download_rounded,
+              color: AppColors.skyBlue, size: 18),
+        ),
+        IconButton(
+          tooltip: 'Convert to Invoice',
+          visualDensity: VisualDensity.compact,
+          onPressed: () => _notReady('Convert'),
+          icon: Icon(Icons.swap_horiz_rounded,
+              color: AppColors.magenta, size: 18),
+        ),
+        IconButton(
+          tooltip: 'Edit',
+          visualDensity: VisualDensity.compact,
+          onPressed: () {
+            controller.startEdit(quotation);
+            Get.toNamed(AppRoutes.quotationForm);
+          },
+          icon: Icon(Icons.edit_rounded, color: AppColors.teal, size: 18),
+        ),
+        IconButton(
+          tooltip: 'Delete',
+          visualDensity: VisualDensity.compact,
+          onPressed: () => controller.deleteQuotation(quotation),
+          icon: Icon(Icons.delete_outline_rounded,
+              color: AppColors.danger, size: 18),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pagination footer
+// ---------------------------------------------------------------------------
+
+class _Pager extends StatelessWidget {
+  final QuotationController controller;
+  const _Pager({required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    final total = controller.filtered.length;
+    final pages = controller.totalPages(total);
+    final page = controller.currentPage.value;
+    final start = total == 0 ? 0 : (page - 1) * controller.pageSize.value + 1;
+    final end = (start + controller.pageSize.value - 1).clamp(0, total);
+
+    return Wrap(
+      alignment: WrapAlignment.spaceBetween,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 10,
+      runSpacing: 8,
+      children: [
+        Text(
+          total == 0
+              ? 'Showing 0 entries'
+              : 'Showing $start to $end of $total entries',
+          style: AppTextStyles.caption,
+        ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              onPressed: page > 1 ? () => controller.goToPage(1) : null,
+              icon: const Icon(Icons.first_page_rounded, size: 18),
+            ),
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              onPressed: page > 1 ? () => controller.goToPage(page - 1) : null,
+              icon: const Icon(Icons.chevron_left_rounded, size: 18),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                gradient: AppColors.goldGradient,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text('$page',
+                  style: AppTextStyles.bodyStrong
+                      .copyWith(color: AppColors.textOnGold)),
+            ),
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              onPressed:
+                  page < pages ? () => controller.goToPage(page + 1) : null,
+              icon: const Icon(Icons.chevron_right_rounded, size: 18),
+            ),
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              onPressed: page < pages ? () => controller.goToPage(pages) : null,
+              icon: const Icon(Icons.last_page_rounded, size: 18),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

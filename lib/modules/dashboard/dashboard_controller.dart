@@ -20,7 +20,7 @@ class DashboardController extends GetxController {
       estimations.fold(0, (sum, e) => sum + e.total);
 
   int get pendingQuotations =>
-      quotations.where((q) => q.status == DocStatus.sent).length;
+      quotations.where((q) => q.status == DocStatus.active).length;
 
   int get pendingEstimations =>
       estimations.where((e) => e.status == DocStatus.draft).length;
