@@ -37,27 +37,27 @@ class PartyListView extends GetView<PartyController> {
             const SizedBox(height: 14),
             Row(
               children: [
-                _actionIcon(
-                  icon: Icons.cloud_upload_rounded,
-                  color: AppColors.success,
-                  tooltip: 'Export',
-                  onTap: () => _showComingSoon(context, 'Export'),
-                ),
-                const SizedBox(width: 5),
-                _actionIcon(
-                  icon: Icons.print_rounded,
-                  color: AppColors.skyBlue,
-                  tooltip: 'Print',
-                  onTap: () => _showComingSoon(context, 'Print'),
-                ),
-                const SizedBox(width: 5),
-                _actionIcon(
-                  icon: Icons.download_rounded,
-                  color: AppColors.skyBlue,
-                  tooltip: 'Download',
-                  onTap: () => _showComingSoon(context, 'Download'),
-                ),
-                const SizedBox(width: 5),
+                // _actionIcon(
+                //   icon: Icons.cloud_upload_rounded,
+                //   color: AppColors.success,
+                //   tooltip: 'Export',
+                //   onTap: () => _showComingSoon(context, 'Export'),
+                // ),
+                // const SizedBox(width: 5),
+                // _actionIcon(
+                //   icon: Icons.print_rounded,
+                //   color: AppColors.skyBlue,
+                //   tooltip: 'Print',
+                //   onTap: () => _showComingSoon(context, 'Print'),
+                // ),
+                // const SizedBox(width: 5),
+                // _actionIcon(
+                //   icon: Icons.download_rounded,
+                //   color: AppColors.skyBlue,
+                //   tooltip: 'Download',
+                //   onTap: () => _showComingSoon(context, 'Download'),
+                // ),
+                // const SizedBox(width: 5),
                 Obx(
                   () => ViewModeToggle(
                     isTableView: controller.isTableView.value,

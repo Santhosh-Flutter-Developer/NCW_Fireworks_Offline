@@ -292,8 +292,7 @@ class _TabBar extends StatelessWidget {
             onTap: () => onChanged(tab),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 150),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
               decoration: BoxDecoration(
                 gradient: selected ? AppColors.goldGradient : null,
                 borderRadius: BorderRadius.circular(9),
@@ -302,9 +301,8 @@ class _TabBar extends StatelessWidget {
                 tab.label,
                 style: AppTextStyles.body.copyWith(
                   fontWeight: FontWeight.w700,
-                  color: selected
-                      ? AppColors.textOnGold
-                      : AppColors.textSecondary,
+                  color:
+                      selected ? AppColors.textOnGold : AppColors.textSecondary,
                 ),
               ),
             ),
@@ -481,7 +479,8 @@ class _QuotationTile extends StatelessWidget {
               const Divider(height: 20),
               Align(
                 alignment: Alignment.centerRight,
-                child: _ActionIcons(quotation: quotation, controller: controller),
+                child:
+                    _ActionIcons(quotation: quotation, controller: controller),
               ),
             ],
           ),
@@ -509,26 +508,26 @@ class _ActionIcons extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        IconButton(
-          tooltip: 'Print',
-          visualDensity: VisualDensity.compact,
-          onPressed: () => _notReady('Print'),
-          icon: Icon(Icons.print_rounded, color: AppColors.ember, size: 18),
-        ),
-        IconButton(
-          tooltip: 'Download',
-          visualDensity: VisualDensity.compact,
-          onPressed: () => _notReady('Download'),
-          icon: Icon(Icons.file_download_rounded,
-              color: AppColors.skyBlue, size: 18),
-        ),
-        IconButton(
-          tooltip: 'Convert to Invoice',
-          visualDensity: VisualDensity.compact,
-          onPressed: () => _notReady('Convert'),
-          icon: Icon(Icons.swap_horiz_rounded,
-              color: AppColors.magenta, size: 18),
-        ),
+        // IconButton(
+        //   tooltip: 'Print',
+        //   visualDensity: VisualDensity.compact,
+        //   onPressed: () => _notReady('Print'),
+        //   icon: Icon(Icons.print_rounded, color: AppColors.ember, size: 18),
+        // ),
+        // IconButton(
+        //   tooltip: 'Download',
+        //   visualDensity: VisualDensity.compact,
+        //   onPressed: () => _notReady('Download'),
+        //   icon: Icon(Icons.file_download_rounded,
+        //       color: AppColors.skyBlue, size: 18),
+        // ),
+        // IconButton(
+        //   tooltip: 'Convert to Invoice',
+        //   visualDensity: VisualDensity.compact,
+        //   onPressed: () => _notReady('Convert'),
+        //   icon: Icon(Icons.swap_horiz_rounded,
+        //       color: AppColors.magenta, size: 18),
+        // ),
         IconButton(
           tooltip: 'Edit',
           visualDensity: VisualDensity.compact,
@@ -564,8 +563,7 @@ class _Pager extends StatelessWidget {
       final total = controller.filtered.length;
       final pages = controller.totalPages(total);
       final page = controller.currentPage.value;
-      final start =
-          total == 0 ? 0 : (page - 1) * controller.pageSize.value + 1;
+      final start = total == 0 ? 0 : (page - 1) * controller.pageSize.value + 1;
       final end = (start + controller.pageSize.value - 1).clamp(0, total);
 
       return Wrap(
@@ -607,9 +605,8 @@ class _Pager extends StatelessWidget {
               ),
               IconButton(
                 visualDensity: VisualDensity.compact,
-                onPressed: page < pages
-                    ? () => controller.goToPage(page + 1)
-                    : null,
+                onPressed:
+                    page < pages ? () => controller.goToPage(page + 1) : null,
                 icon: const Icon(Icons.chevron_right_rounded, size: 18),
               ),
               IconButton(

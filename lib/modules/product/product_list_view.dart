@@ -35,43 +35,43 @@ class ProductListView extends GetView<ProductController> {
               onChanged: controller.setSearch,
             ),
             const SizedBox(height: 14),
+            // Row(
+            //   children: [
+            //     Expanded(
+            //       child: _toolbarButton(
+            //         icon: Icons.cloud_upload_rounded,
+            //         label: 'Stock Upload',
+            //         color: AppColors.skyBlue,
+            //         onTap: () => _showComingSoon('Stock upload'),
+            //       ),
+            //     ),
+            //     const SizedBox(
+            //       width: 10.0,
+            //     ),
+            //     Expanded(
+            //       child: _toolbarButton(
+            //         icon: Icons.inventory_2_rounded,
+            //         label: 'Product Upload',
+            //         color: AppColors.skyBlue,
+            //         onTap: () => _showComingSoon('Bulk product upload'),
+            //       ),
+            //     ),
+            //   ],
+            // ),
+            // const SizedBox(
+            //   height: 6.0,
+            // ),
             Row(
               children: [
-                Expanded(
-                  child: _toolbarButton(
-                    icon: Icons.cloud_upload_rounded,
-                    label: 'Stock Upload',
-                    color: AppColors.skyBlue,
-                    onTap: () => _showComingSoon('Stock upload'),
-                  ),
-                ),
-                const SizedBox(
-                  width: 10.0,
-                ),
-                Expanded(
-                  child: _toolbarButton(
-                    icon: Icons.inventory_2_rounded,
-                    label: 'Product Upload',
-                    color: AppColors.skyBlue,
-                    onTap: () => _showComingSoon('Bulk product upload'),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(
-              height: 6.0,
-            ),
-            Row(
-              children: [
-                _actionIcon(
-                  icon: Icons.download_rounded,
-                  color: AppColors.success,
-                  tooltip: 'Download',
-                  onTap: () => _showComingSoon('Download'),
-                ),
-                const SizedBox(
-                  width: 10.0,
-                ),
+                // _actionIcon(
+                //   icon: Icons.download_rounded,
+                //   color: AppColors.success,
+                //   tooltip: 'Download',
+                //   onTap: () => _showComingSoon('Download'),
+                // ),
+                // const SizedBox(
+                //   width: 10.0,
+                // ),
                 Obx(
                   () => ViewModeToggle(
                     isTableView: controller.isTableView.value,
@@ -79,19 +79,19 @@ class ProductListView extends GetView<ProductController> {
                   ),
                 ),
                 const Spacer(),
-                ElevatedButton.icon(
-                  onPressed: () {
-                    controller.startCreate();
-                    Get.toNamed(AppRoutes.productForm);
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.ember,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                  ),
-                  icon: const Icon(Icons.add_circle_rounded, size: 18),
-                  label: const Text('Add'),
-                ),
+                // ElevatedButton.icon(
+                //   onPressed: () {
+                //     controller.startCreate();
+                //     Get.toNamed(AppRoutes.productForm);
+                //   },
+                //   style: ElevatedButton.styleFrom(
+                //     backgroundColor: AppColors.ember,
+                //     foregroundColor: Colors.white,
+                //     padding: const EdgeInsets.symmetric(horizontal: 16),
+                //   ),
+                //   icon: const Icon(Icons.add_circle_rounded, size: 18),
+                //   label: const Text('Add'),
+                // ),
               ],
             ),
             const SizedBox(height: 16),
@@ -118,7 +118,7 @@ class ProductListView extends GetView<ProductController> {
                         'Stock Maintain',
                         'Negative Stock',
                         'Current Stock',
-                        'Action',
+                        // 'Action',
                       ],
                       rows: List.generate(list.length, (i) {
                         final p = list[i];
@@ -157,14 +157,14 @@ class ProductListView extends GetView<ProductController> {
                                   : AppColors.textPrimary,
                             ),
                           ),
-                          _actionRow(p),
+                          // _actionRow(p),
                         ];
                       }),
                     ),
                   );
                 }
                 return ListView.separated(
-                  padding: const EdgeInsets.only(bottom: 16),
+                  padding: const EdgeInsets.only(bottom: 16, left: 0.0),
                   itemCount: list.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 10),
                   itemBuilder: (context, index) {
@@ -196,12 +196,12 @@ class ProductListView extends GetView<ProductController> {
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(
-            tooltip: 'Prices',
-            visualDensity: VisualDensity.compact,
-            onPressed: () => _openPriceSheet(context, p),
-            icon: Icon(Icons.sell_rounded, color: AppColors.skyBlue, size: 18),
-          ),
+          // IconButton(
+          //   tooltip: 'Prices',
+          //   visualDensity: VisualDensity.compact,
+          //   onPressed: () => _openPriceSheet(context, p),
+          //   icon: Icon(Icons.sell_rounded, color: AppColors.skyBlue, size: 18),
+          // ),
           IconButton(
             tooltip: 'Edit',
             visualDensity: VisualDensity.compact,
@@ -470,7 +470,7 @@ class _ProductTile extends StatelessWidget {
       borderRadius: BorderRadius.circular(18),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
-        onTap: onTap,
+        // onTap: onTap,
         child: Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
@@ -510,20 +510,20 @@ class _ProductTile extends StatelessWidget {
                       ],
                     ),
                   ),
-                  IconButton(
-                    tooltip: 'Prices',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: onPrice,
-                    icon: Icon(Icons.sell_rounded,
-                        color: AppColors.skyBlue, size: 18),
-                  ),
-                  IconButton(
-                    tooltip: 'Delete',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: onDelete,
-                    icon: Icon(Icons.delete_outline_rounded,
-                        color: AppColors.textMuted, size: 18),
-                  ),
+                  // IconButton(
+                  //   tooltip: 'Prices',
+                  //   visualDensity: VisualDensity.compact,
+                  //   onPressed: onPrice,
+                  //   icon: Icon(Icons.sell_rounded,
+                  //       color: AppColors.skyBlue, size: 18),
+                  // ),
+                  // IconButton(
+                  //   tooltip: 'Delete',
+                  //   visualDensity: VisualDensity.compact,
+                  //   onPressed: onDelete,
+                  //   icon: Icon(Icons.delete_outline_rounded,
+                  //       color: AppColors.textMuted, size: 18),
+                  // ),
                 ],
               ),
               const SizedBox(height: 10),
