@@ -108,6 +108,9 @@ class LoginView extends GetView<LoginController> {
             const SizedBox(height: 8),
             TextField(
               controller: controller.usernameCtrl,
+              enabled: !controller.isLoading.value,
+              textInputAction: TextInputAction.next,
+              autocorrect: false,
               style: AppTextStyles.body.copyWith(color: AppColors.textPrimary),
               decoration: InputDecoration(
                 hintText: 'Enter your username',
@@ -120,7 +123,10 @@ class LoginView extends GetView<LoginController> {
             const SizedBox(height: 8),
             TextField(
               controller: controller.passwordCtrl,
+              enabled: !controller.isLoading.value,
               obscureText: controller.obscurePassword.value,
+              autocorrect: false,
+              textInputAction: TextInputAction.done,
               style: AppTextStyles.body.copyWith(color: AppColors.textPrimary),
               decoration: InputDecoration(
                 hintText: 'Enter your password',
@@ -142,13 +148,16 @@ class LoginView extends GetView<LoginController> {
             if (controller.errorText.value != null) ...[
               const SizedBox(height: 12),
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Icon(Icons.error_outline_rounded,
                       color: AppColors.danger, size: 16),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      controller.errorText.value!,
+                      controller.isLockedOut
+                          ? 'Too many failed attempts. Try again in ${controller.lockoutSecondsLeft.value}s.'
+                          : controller.errorText.value!,
                       style: AppTextStyles.caption
                           .copyWith(color: AppColors.danger),
                     ),
@@ -160,8 +169,10 @@ class LoginView extends GetView<LoginController> {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed:
-                    controller.isLoading.value ? null : controller.login,
+                onPressed: (controller.isLoading.value ||
+                        controller.isLockedOut)
+                    ? null
+                    : controller.login,
                 child: controller.isLoading.value
                     ? SizedBox(
                         width: 20,

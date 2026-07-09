@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import '../core/services/session_service.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/app_text_styles.dart';
 import '../routes/app_routes.dart';
@@ -79,11 +80,11 @@ class _AppDrawerState extends State<AppDrawer> {
                     ],
                   ),
                   const SizedBox(height: 4),
-                  // _navTile(
-                  //   icon: Icons.tune_rounded,
-                  //   label: 'Stock Adjustment',
-                  //   route: AppRoutes.stockAdjustmentList,
-                  // ),
+                  _navTile(
+                    icon: Icons.tune_rounded,
+                    label: 'Stock Adjustment',
+                    route: AppRoutes.stockAdjustmentList,
+                  ),
                 ],
               ),
             ),
@@ -141,37 +142,51 @@ class _AppDrawerState extends State<AppDrawer> {
   }
 
   Widget _buildFooter() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        border: Border(top: BorderSide(color: AppColors.divider)),
-      ),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 18,
-            backgroundColor: AppColors.surfaceHigh,
-            child: Icon(Icons.person, color: AppColors.textSecondary, size: 18),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Srisoftwarez', style: AppTextStyles.bodyStrong),
-                Text('Retail Admin', style: AppTextStyles.caption),
-              ],
+    final session = Get.find<SessionService>().currentSession;
+    return Obx(() {
+      final name = session.value?.displayName ?? 'Srisoftwarez';
+      final phone = session.value?.displayPhone;
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          border: Border(top: BorderSide(color: AppColors.divider)),
+        ),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: AppColors.surfaceHigh,
+              child: Icon(Icons.person,
+                  color: AppColors.textSecondary, size: 18),
             ),
-          ),
-          IconButton(
-            tooltip: 'Logout',
-            onPressed: () => Get.offAllNamed(AppRoutes.login),
-            icon: Icon(Icons.logout_rounded,
-                color: AppColors.textMuted, size: 20),
-          ),
-        ],
-      ),
-    );
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
+                    style: AppTextStyles.bodyStrong,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(phone ?? 'Retail Admin', style: AppTextStyles.caption),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: 'Logout',
+              onPressed: () async {
+                await Get.find<SessionService>().clearSession();
+                Get.offAllNamed(AppRoutes.login);
+              },
+              icon: Icon(Icons.logout_rounded,
+                  color: AppColors.textMuted, size: 20),
+            ),
+          ],
+        ),
+      );
+    });
   }
 
   Widget _navTile({
