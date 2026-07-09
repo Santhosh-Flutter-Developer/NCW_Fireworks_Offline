@@ -107,55 +107,72 @@ class _FilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 10,
-      runSpacing: 10,
+    return Column(
       children: [
-        SizedBox(
-          width: 160,
-          child: Obx(() => _DateField(
-                label: 'From Date',
-                date: controller.filterFrom.value,
-                df: df,
-                onTap: () => _pickDate(context, controller.filterFrom.value,
-                    controller.setDateFrom),
-              )),
+        Row(
+          children: [
+            Obx(() => Expanded(
+                  child: _DateField(
+                    label: 'From Date',
+                    date: controller.filterFrom.value,
+                    df: df,
+                    onTap: () => _pickDate(context, controller.filterFrom.value,
+                        controller.setDateFrom),
+                  ),
+                )),
+            const SizedBox(
+              width: 10.0,
+            ),
+            Obx(() => Expanded(
+                  child: _DateField(
+                    label: 'To Date',
+                    date: controller.filterTo.value,
+                    df: df,
+                    onTap: () => _pickDate(context, controller.filterTo.value,
+                        controller.setDateTo),
+                  ),
+                )),
+          ],
         ),
-        SizedBox(
-          width: 160,
-          child: Obx(() => _DateField(
-                label: 'To Date',
-                date: controller.filterTo.value,
-                df: df,
-                onTap: () => _pickDate(
-                    context, controller.filterTo.value, controller.setDateTo),
-              )),
+        const SizedBox(
+          height: 10.0,
         ),
-        SizedBox(
-          width: 200,
-          child: SearchField(
-            hint: 'Bill No. Search',
-            onChanged: controller.setSearch,
-          ),
+        Row(
+          children: [
+            Expanded(
+              child: SearchField(
+                hint: 'Bill No. Search',
+                onChanged: controller.setSearch,
+              ),
+            ),
+          ],
         ),
-        SizedBox(
-          width: 180,
-          child: Obx(() => _DropdownField(
-                label: 'Agent',
-                value: controller.filterAgent.value,
-                items: controller.agents,
-                onChanged: controller.setAgentFilter,
-              )),
+        const SizedBox(
+          height: 10.0,
         ),
-        SizedBox(
-          width: 200,
-          child: Obx(() => _DropdownField(
-                label: 'Party',
-                value: controller.filterParty.value,
-                items: controller.parties.map((p) => p.name).toList(),
-                onChanged: controller.setPartyFilter,
-              )),
-        ),
+        Row(
+          children: [
+            Obx(() => Expanded(
+                  child: _DropdownField(
+                    label: 'Agent',
+                    value: controller.filterAgent.value,
+                    items: controller.agents,
+                    onChanged: controller.setAgentFilter,
+                  ),
+                )),
+            const SizedBox(
+              width: 10.0,
+            ),
+            Obx(() => Expanded(
+                  child: _DropdownField(
+                    label: 'Party',
+                    value: controller.filterParty.value,
+                    items: controller.parties.map((p) => p.name).toList(),
+                    onChanged: controller.setPartyFilter,
+                  ),
+                )),
+          ],
+        )
       ],
     );
   }
@@ -287,22 +304,27 @@ class _TabBar extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: QuotationTab.values.map((tab) {
           final selected = tab == active;
-          return InkWell(
-            borderRadius: BorderRadius.circular(9),
-            onTap: () => onChanged(tab),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
-              decoration: BoxDecoration(
-                gradient: selected ? AppColors.goldGradient : null,
-                borderRadius: BorderRadius.circular(9),
-              ),
-              child: Text(
-                tab.label,
-                style: AppTextStyles.body.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color:
-                      selected ? AppColors.textOnGold : AppColors.textSecondary,
+          return Expanded(
+            child: InkWell(
+              borderRadius: BorderRadius.circular(9),
+              onTap: () => onChanged(tab),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
+                decoration: BoxDecoration(
+                  gradient: selected ? AppColors.goldGradient : null,
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Text(
+                  tab.label,
+                  textAlign: TextAlign.center,
+                  style: AppTextStyles.body.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: selected
+                        ? AppColors.textOnGold
+                        : AppColors.textSecondary,
+                  ),
                 ),
               ),
             ),

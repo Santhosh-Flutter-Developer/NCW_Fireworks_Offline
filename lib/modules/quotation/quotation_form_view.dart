@@ -24,94 +24,149 @@ class QuotationFormView extends GetView<QuotationController> {
             ? 'Edit Quotation - ${controller.editingQuotation!.quotationNo}'
             : 'Add Quotation'),
       ),
-      body: Container(
-        decoration: BoxDecoration(gradient: AppColors.backgroundGradient),
-        child: SafeArea(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(18, 18, 18, 160),
-            children: [
-              Obx(() => _GrandTotalBanner(total: controller.formTotal)),
-              const SizedBox(height: 18),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: _dateTile(
-                      context,
-                      label: 'Bill Date *',
-                      date: controller.quotationDate.value,
-                      onTap: () =>
-                          _pickDate(context, controller.quotationDate),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Obx(() => _pickerTile(
-                          label: 'Pricelist *',
-                          value: controller.selectedPricelist.value,
-                          onTap: () => _openPricelistPicker(context),
-                        )),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Obx(() => _pickerTile(
-                          label: 'Agent',
-                          value: controller.selectedAgent.value,
-                          placeholder: 'Direct',
-                          onTap: () => _openAgentPicker(context),
-                        )),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Obx(() => _pickerTile(
-                          label: 'Party *',
-                          value: controller.selectedParty.value?.name,
-                          onTap: () => _openPartyPicker(context),
-                        )),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 22),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('Items', style: AppTextStyles.h3),
-                  TextButton.icon(
-                    onPressed: () => _openProductPicker(context),
-                    icon: const Icon(Icons.add_rounded, size: 18),
-                    label: const Text('Add Item'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Obx(() {
-                if (controller.formItems.isEmpty) {
-                  return const EmptyState(
-                    icon: Icons.shopping_basket_outlined,
-                    title: 'No items added',
-                    subtitle: 'Tap "Add Item" to add products to this quotation.',
-                  );
-                }
-                return Column(
+      body: Column(
+        children: [
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(gradient: AppColors.backgroundGradient),
+              child: SafeArea(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(18, 18, 18, 160),
                   children: [
-                    _sectionBlock(section: 1, label: 'Section 1'),
+                    Obx(() => _GrandTotalBanner(total: controller.formTotal)),
+                    const SizedBox(height: 18),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: _dateTile(
+                            context,
+                            label: 'Bill Date *',
+                            date: controller.quotationDate.value,
+                            onTap: () =>
+                                _pickDate(context, controller.quotationDate),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Obx(() => _pickerTile(
+                                label: 'Pricelist *',
+                                value: controller.selectedPricelist.value,
+                                onTap: () => _openPricelistPicker(context),
+                              )),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Obx(() => _pickerTile(
+                                label: 'Agent',
+                                value: controller.selectedAgent.value,
+                                placeholder: 'Direct',
+                                onTap: () => _openAgentPicker(context),
+                              )),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Obx(() => _pickerTile(
+                                label: 'Party *',
+                                value: controller.selectedParty.value?.name,
+                                onTap: () => _openPartyPicker(context),
+                              )),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 22),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Items', style: AppTextStyles.h3),
+                        TextButton.icon(
+                          onPressed: () => _openProductPicker(context),
+                          icon: const Icon(Icons.add_rounded, size: 18),
+                          label: const Text('Add Item'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Obx(() {
+                      if (controller.formItems.isEmpty) {
+                        return const EmptyState(
+                          icon: Icons.shopping_basket_outlined,
+                          title: 'No items added',
+                          subtitle:
+                              'Tap "Add Item" to add products to this quotation.',
+                        );
+                      }
+                      return Column(
+                        children: [
+                          _sectionBlock(section: 1, label: 'Section 1'),
+                          const SizedBox(height: 14),
+                          _sectionBlock(section: 2, label: 'Section 2'),
+                        ],
+                      );
+                    }),
                     const SizedBox(height: 14),
-                    _sectionBlock(section: 2, label: 'Section 2'),
+                    Obx(() => _totalsCard()),
                   ],
-                );
-              }),
-              const SizedBox(height: 14),
-              Obx(() => _totalsCard()),
-            ],
+                ),
+              ),
+            ),
           ),
-        ),
+          Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => controller.clearForm(),
+                        child: const Text('Clear'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => _showPreview(context),
+                        child: const Text('Preview'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.magenta),
+                        onPressed: () => controller.save(asDraft: true),
+                        child: const Text('Draft'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.success),
+                        onPressed: () => controller.save(asDraft: false),
+                        child: const Text('Confirm'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          )
+        ],
       ),
-      bottomNavigationBar: SafeArea(
+      /*bottomNavigationBar: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
           child: Row(
@@ -150,7 +205,7 @@ class QuotationFormView extends GetView<QuotationController> {
             ],
           ),
         ),
-      ),
+      ),*/
     );
   }
 
@@ -220,8 +275,8 @@ class QuotationFormView extends GetView<QuotationController> {
               ),
               InkWell(
                 borderRadius: BorderRadius.circular(8),
-                onTap: () => controller.moveToSection(
-                    i, item.section == 1 ? 2 : 1),
+                onTap: () =>
+                    controller.moveToSection(i, item.section == 1 ? 2 : 1),
                 child: Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -254,7 +309,8 @@ class QuotationFormView extends GetView<QuotationController> {
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: Text('Rate: ₹${item.rate.toStringAsFixed(2)} / ${item.unit}',
+                child: Text(
+                    'Rate: ₹${item.rate.toStringAsFixed(2)} / ${item.unit}',
                     style: AppTextStyles.caption),
               ),
               Text(
@@ -371,7 +427,8 @@ class QuotationFormView extends GetView<QuotationController> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text('$label Total', style: AppTextStyles.bodyStrong),
-            Text('₹${total.toStringAsFixed(2)}', style: AppTextStyles.bodyStrong),
+            Text('₹${total.toStringAsFixed(2)}',
+                style: AppTextStyles.bodyStrong),
           ],
         ),
         const SizedBox(height: 8),
@@ -564,7 +621,8 @@ class QuotationFormView extends GetView<QuotationController> {
                   final item = items[i];
                   return ListTile(
                     contentPadding: EdgeInsets.zero,
-                    title: Text(itemLabel(item), style: AppTextStyles.bodyStrong),
+                    title:
+                        Text(itemLabel(item), style: AppTextStyles.bodyStrong),
                     onTap: () {
                       onSelected(item);
                       Get.back();
@@ -726,8 +784,7 @@ class QuotationFormView extends GetView<QuotationController> {
                     Text(
                         'Party: ${controller.selectedParty.value?.name ?? '-'}',
                         style: AppTextStyles.body),
-                    Text(
-                        'Agent: ${controller.selectedAgent.value ?? 'Direct'}',
+                    Text('Agent: ${controller.selectedAgent.value ?? 'Direct'}',
                         style: AppTextStyles.body),
                     Text('Date: ${_df.format(controller.quotationDate.value)}',
                         style: AppTextStyles.body),
