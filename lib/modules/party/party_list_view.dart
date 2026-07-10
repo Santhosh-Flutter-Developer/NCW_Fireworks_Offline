@@ -27,11 +27,9 @@ class PartyListView extends GetView<PartyController> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SectionLabel(text: 'Agent'),
-            Obx(() => _agentDropdown(context)),
-            const SizedBox(height: 14),
+           
             SearchField(
-              hint: 'Name/No/City Search',
+              hint: 'Search by party name',
               onChanged: controller.setSearch,
             ),
             const SizedBox(height: 14),
@@ -83,6 +81,10 @@ class PartyListView extends GetView<PartyController> {
             const SizedBox(height: 16),
             Expanded(
               child: Obx(() {
+                if (controller.isLoadingList.value &&
+                    controller.paginated.isEmpty) {
+                  return const Center(child: CircularProgressIndicator());
+                }
                 final list = controller.paginated;
                 if (list.isEmpty) {
                   return const EmptyState(
@@ -98,7 +100,6 @@ class PartyListView extends GetView<PartyController> {
                     child: AppDataTable(
                       columns: const [
                         'S.No',
-                        'Agent',
                         'Party Name',
                         'State',
                         'Action',
@@ -108,7 +109,7 @@ class PartyListView extends GetView<PartyController> {
                         return [
                           Text('${startIndex + i + 1}',
                               style: AppTextStyles.body),
-                          Text(party.agentLabel, style: AppTextStyles.body),
+                          
                           SizedBox(
                             width: 200,
                             child: Text(party.name,
@@ -123,20 +124,11 @@ class PartyListView extends GetView<PartyController> {
                               IconButton(
                                 tooltip: 'Edit',
                                 visualDensity: VisualDensity.compact,
-                                onPressed: () {
-                                  controller.startEdit(party);
-                                  Get.toNamed(AppRoutes.partyForm);
-                                },
+                                onPressed: () => controller.startEdit(party),
                                 icon: Icon(Icons.edit_rounded,
                                     color: AppColors.teal, size: 18),
                               ),
-                              IconButton(
-                                tooltip: 'Delete',
-                                visualDensity: VisualDensity.compact,
-                                onPressed: () => controller.deleteParty(party),
-                                icon: Icon(Icons.delete_outline_rounded,
-                                    color: AppColors.danger, size: 18),
-                              ),
+                              
                             ],
                           ),
                         ];
@@ -153,10 +145,7 @@ class PartyListView extends GetView<PartyController> {
                     return _PartyTile(
                       serial: startIndex + index + 1,
                       party: party,
-                      onTap: () {
-                        controller.startEdit(party);
-                        Get.toNamed(AppRoutes.partyForm);
-                      },
+                      onTap: () => controller.startEdit(party),
                       onDelete: () => controller.deleteParty(party),
                     );
                   },
@@ -165,77 +154,6 @@ class PartyListView extends GetView<PartyController> {
             ),
             const SizedBox(height: 8),
             Obx(() => _paginationBar(context)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _agentDropdown(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(14),
-      onTap: () => _openAgentPicker(context),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: AppColors.surfaceElevated,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.divider),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.support_agent_rounded, color: AppColors.textMuted),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                controller.filterAgent.value ?? 'All Agents',
-                style: AppTextStyles.body.copyWith(
-                  color: controller.filterAgent.value != null
-                      ? AppColors.textPrimary
-                      : AppColors.textMuted,
-                ),
-              ),
-            ),
-            Icon(Icons.keyboard_arrow_down_rounded, color: AppColors.textMuted),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _openAgentPicker(BuildContext context) {
-    Get.bottomSheet(
-      Container(
-        decoration: BoxDecoration(
-          color: AppColors.surfaceElevated,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Select Agent', style: AppTextStyles.h3),
-            const SizedBox(height: 10),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.clear_all_rounded),
-              title: const Text('All Agents'),
-              onTap: () {
-                controller.setAgentFilter(null);
-                Get.back();
-              },
-            ),
-            ...controller.agentOptions.map(
-              (agent) => ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.person_outline_rounded),
-                title: Text(agent),
-                onTap: () {
-                  controller.setAgentFilter(agent);
-                  Get.back();
-                },
-              ),
-            ),
           ],
         ),
       ),
@@ -439,17 +357,11 @@ class _PartyTile extends StatelessWidget {
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      'Agent: ${party.agentLabel} • ${party.state}',
+                      party.state,
                       style: AppTextStyles.caption,
                     ),
                   ],
                 ),
-              ),
-              IconButton(
-                onPressed: onDelete,
-                visualDensity: VisualDensity.compact,
-                icon: Icon(Icons.delete_outline_rounded,
-                    color: AppColors.textMuted, size: 18),
               ),
             ],
           ),

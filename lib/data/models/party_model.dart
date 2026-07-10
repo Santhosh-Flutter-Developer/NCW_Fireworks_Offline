@@ -28,6 +28,7 @@ class PartyModel {
   double openingBalance;
   BalanceType balanceType;
   bool isDraft;
+   bool hasFullDetails;
 
   PartyModel({
     required this.id,
@@ -47,6 +48,7 @@ class PartyModel {
     this.openingBalance = 0,
     this.balanceType = BalanceType.credit,
     this.isDraft = false,
+    this.hasFullDetails = true,
   });
 
   String get initials {

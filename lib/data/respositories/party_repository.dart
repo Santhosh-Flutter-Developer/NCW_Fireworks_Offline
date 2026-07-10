@@ -1,6 +1,8 @@
 import '../../core/constants/api_endpoints.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_exception.dart';
+import '../models/party/party_detail_response_model.dart';
+import '../models/party/party_list_response_model.dart';
 import '../models/party/party_save_response_model.dart';
 
 /// Talks to `party.php`. Mirrors [AuthRepository]'s contract: every method
@@ -69,6 +71,52 @@ class PartyRepository {
     // Every non-200 head.code from this endpoint is a business/validation
     // rejection with an already user-presentable message (duplicate name,
     // duplicate mobile, invalid agent, invalid creator, etc).
+    throw ApiRequestException(result.message);
+  }
+
+  /// Fetches a page of the party list. [agentId] is always sent as an
+  /// empty string for now — there's no agent filter in the UI — and
+  /// [searchText] matches by party name.
+  Future<PartyListResponseModel> listParties({
+    String agentId = '',
+    String searchText = '',
+    int pageNumber = 1,
+    int pageLimit = 10,
+  }) async {
+    final json = await _apiClient.postJson(
+      ApiEndpoints.party,
+      body: {
+        'party_listing': '1',
+        'filter_agent_id': agentId,
+        'search_text': searchText,
+        'page_number': pageNumber.toString(),
+        'page_limit': pageLimit.toString(),
+      },
+    );
+
+    final result = PartyListResponseModel.fromJson(json);
+
+    if (result.isSuccess) {
+      return result;
+    }
+
+    throw ApiRequestException(result.message);
+  }
+
+  /// Fetches full details for one party, used to hydrate the Edit form
+  /// before saving — the list endpoint only returns id/name/state.
+  Future<PartyDetailResponseModel> getPartyDetail(String partyId) async {
+    final json = await _apiClient.postJson(
+      ApiEndpoints.party,
+      body: {'show_party_id': partyId},
+    );
+
+    final result = PartyDetailResponseModel.fromJson(json);
+
+    if (result.isSuccess) {
+      return result;
+    }
+
     throw ApiRequestException(result.message);
   }
 }

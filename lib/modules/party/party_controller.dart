@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../../core/network/api_exception.dart';
@@ -5,6 +7,7 @@ import '../../core/services/session_service.dart';
 import '../../data/dummy/dummy_data.dart';
 import '../../data/models/party_model.dart';
 import '../../data/respositories/party_repository.dart';
+import '../../routes/app_routes.dart';
 
 class PartyController extends GetxController {
   PartyController({
@@ -18,17 +21,23 @@ class PartyController extends GetxController {
 
   final parties = <PartyModel>[].obs;
   final searchQuery = ''.obs;
-  final filterAgent = RxnString();
   final isTableView = false.obs;
   final isSaving = false.obs;
+  final isLoadingList = false.obs;
+  final isLoadingDetail = false.obs;
 
-  // Pagination (mirrors the web app's Page Limit / Page No controls)
+  // Pagination (mirrors the web app's Page Limit / Page No controls).
+  // The party_listing sample response we have doesn't show a total
+  // row/page count, so totalPages is a best guess: trusted when the
+  // server does return one, otherwise inferred from whether the last
+  // fetch came back with a full page (see _loadParties).
   final pageLimit = 10.obs;
   final pageNo = 1.obs;
+  final totalPagesRx = 1.obs;
   static const List<int> pageLimitOptions = [10, 25, 50, 100];
+  Timer? _searchDebounce;
 
   // Dropdown data sources
-  List<String> get agentOptions => DummyData.agents;
   List<String> get stateOptions => DummyData.states;
   List<String> districtOptions(String state) =>
       DummyData.districtsByState[state] ?? [];
@@ -74,54 +83,94 @@ class PartyController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-    parties.assignAll(DummyData.parties());
+    loadParties();
   }
 
-  List<PartyModel> get filtered {
-    final list = parties.where((p) {
-      final q = searchQuery.value.toLowerCase();
-      final matchesQuery = q.isEmpty ||
-          p.name.toLowerCase().contains(q) ||
-          p.phone.contains(q) ||
-          p.city.toLowerCase().contains(q);
-      final matchesAgent =
-          filterAgent.value == null || p.agent == filterAgent.value;
-      return matchesQuery && matchesAgent;
-    }).toList();
-    return list;
-  }
+  /// The current page's rows, as returned by the server. Named
+  /// `paginated` to match what [PartyListView] already expects.
+  List<PartyModel> get paginated => parties;
 
-  int get totalPages {
-    final count = filtered.length;
-    if (count == 0) return 1;
-    return (count / pageLimit.value).ceil();
-  }
+  int get totalPages => totalPagesRx.value;
 
-  List<PartyModel> get paginated {
-    final list = filtered;
-    if (pageNo.value > totalPages) pageNo.value = totalPages;
-    final start = (pageNo.value - 1) * pageLimit.value;
-    if (start >= list.length) return [];
-    final end = (start + pageLimit.value).clamp(0, list.length);
-    return list.sublist(start, end);
+  /// Fetches the current page/search/limit from `party.php`
+  /// (`party_listing`). Every control that changes what page we're
+  /// looking at (search, page limit, page number) routes through this.
+  Future<void> loadParties() async {
+    isLoadingList.value = true;
+    try {
+      final result = await _partyRepository.listParties(
+        searchText: searchQuery.value.trim(),
+        pageNumber: pageNo.value,
+        pageLimit: pageLimit.value,
+      );
+
+      parties.assignAll(result.items.map((item) => PartyModel(
+            id: item.partyId,
+            serverPartyId: item.partyId,
+            name: item.partyName.isEmpty ? 'Untitled Party' : item.partyName,
+            state: item.state,
+            // The list endpoint only returns id/name/state — every other
+            // field is unknown, so this row can't be safely re-saved
+            // without a get-by-id endpoint to fill in the rest first.
+            hasFullDetails: false,
+          )));
+
+      if (result.totalPages != null) {
+        totalPagesRx.value = result.totalPages!.clamp(1, 1 << 30);
+      } else if (result.totalRecords != null) {
+        totalPagesRx.value =
+            (result.totalRecords! / pageLimit.value).ceil().clamp(1, 1 << 30);
+      } else {
+        // No total given anywhere — infer from whether this page was
+        // full. A full page means there's probably at least one more;
+        // this self-corrects once the user reaches the real last page.
+        totalPagesRx.value = result.items.length < pageLimit.value
+            ? pageNo.value
+            : pageNo.value + 1;
+      }
+    } on ApiRequestException catch (e) {
+      // Some "no rows match" cases may come back as a non-200 business
+      // response rather than a 200 with an empty list — treat that as
+      // an empty page rather than a scary error toast.
+      final looksLikeEmptyResult = e.message.toLowerCase().contains('no') &&
+          (e.message.toLowerCase().contains('record') ||
+              e.message.toLowerCase().contains('party') ||
+              e.message.toLowerCase().contains('data'));
+      parties.clear();
+      totalPagesRx.value = 1;
+      if (!looksLikeEmptyResult) {
+        Get.snackbar('Could not load parties', e.message,
+            snackPosition: SnackPosition.BOTTOM);
+      }
+    } on ApiException catch (e) {
+      parties.clear();
+      totalPagesRx.value = 1;
+      Get.snackbar('Could not load parties', e.message,
+          snackPosition: SnackPosition.BOTTOM);
+    } finally {
+      isLoadingList.value = false;
+    }
   }
 
   void setSearch(String value) {
     searchQuery.value = value;
-    pageNo.value = 1;
-  }
-
-  void setAgentFilter(String? agent) {
-    filterAgent.value = filterAgent.value == agent ? null : agent;
-    pageNo.value = 1;
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 400), () {
+      pageNo.value = 1;
+      loadParties();
+    });
   }
 
   void setPageLimit(int limit) {
     pageLimit.value = limit;
     pageNo.value = 1;
+    loadParties();
   }
 
-  void setPageNo(int page) => pageNo.value = page;
+  void setPageNo(int page) {
+    pageNo.value = page;
+    loadParties();
+  }
   void toggleViewMode(bool table) => isTableView.value = table;
 
   void startCreate() {
@@ -142,8 +191,7 @@ class PartyController extends GetxController {
     formBalanceType.value = BalanceType.credit;
   }
 
-  void startEdit(PartyModel party) {
-    editingParty = party;
+  void _populateFormFrom(PartyModel party) {
     formAgent.value = party.agent.isEmpty ? null : party.agent;
     nameCtrl.text = party.name;
     phoneCtrl.text = party.phone;
@@ -159,6 +207,61 @@ class PartyController extends GetxController {
     openingBalanceCtrl.text =
         party.openingBalance == 0 ? '' : party.openingBalance.toString();
     formBalanceType.value = party.balanceType;
+  }
+
+  /// Opens the Edit form for [party]. If we already know every field
+  /// (created this session, or bundled demo data) this just populates
+  /// the form directly. Rows that came from the party list endpoint
+  /// only have id/name/state, so this fetches the rest via
+  /// `show_party_id` first — editing without that would otherwise blank
+  /// out every other field the next time it's saved.
+  Future<void> startEdit(PartyModel party) async {
+    if (party.hasFullDetails || party.serverPartyId == null) {
+      editingParty = party;
+      _populateFormFrom(party);
+      Get.toNamed(AppRoutes.partyForm);
+      return;
+    }
+
+    isLoadingDetail.value = true;
+    Get.dialog(
+      const Center(child: CircularProgressIndicator()),
+      barrierDismissible: false,
+    );
+    try {
+      final detail = await _partyRepository.getPartyDetail(
+        party.serverPartyId!,
+      );
+
+      party
+        ..name = detail.partyName.isEmpty ? party.name : detail.partyName
+        ..phone = detail.mobileNumber
+        ..email = detail.email
+        ..address = detail.address
+        ..state = detail.state.isEmpty ? party.state : detail.state
+        ..district = detail.district
+        ..city = detail.city
+        ..othersCity = detail.othersCity
+        ..pincode = detail.pincode
+        ..identification = detail.identification
+        ..gstin = detail.gstNumber
+        ..openingBalance = detail.openingBalance
+        ..balanceType = detail.openingBalanceType == 2
+            ? BalanceType.debit
+            : BalanceType.credit
+        ..hasFullDetails = true;
+
+      Get.back(); // close the loading dialog
+      editingParty = party;
+      _populateFormFrom(party);
+      Get.toNamed(AppRoutes.partyForm);
+    } on ApiException catch (e) {
+      Get.back(); // close the loading dialog
+      Get.snackbar('Could not open party', e.message,
+          snackPosition: SnackPosition.BOTTOM);
+    } finally {
+      isLoadingDetail.value = false;
+    }
   }
 
   /// Returns a validation error message, or null if the form is valid.
@@ -247,16 +350,20 @@ class PartyController extends GetxController {
     // Editing a row we never got a real party_id for (e.g. the bundled
     // demo rows, or a row created before the API returned one) can't be
     // sent to party.php — there is nothing for the server to match
-    // against — so that case falls back to a local-only update.
-    final canSyncToServer =
-        editingParty == null || editingParty!.serverPartyId != null;
+    // against. Same for a row that came from the party list endpoint:
+    // it only has id/name/state, so sending it back would blank out
+    // every other field on the server. Both cases fall back to a
+    // local-only update.
+    final canSyncToServer = editingParty == null ||
+        (editingParty!.serverPartyId != null &&
+            editingParty!.hasFullDetails);
 
     if (!canSyncToServer) {
       _applyLocally(asDraft: asDraft, balance: balance, name: name);
       Get.back();
       Get.snackbar(
         'Saved locally',
-        'This party isn\'t linked to the server yet, so the change was only saved on this device.',
+        'The full details for this party aren\'t loaded from the server yet, so the change was only saved on this device.',
         snackPosition: SnackPosition.BOTTOM,
       );
       return true;
@@ -268,7 +375,7 @@ class PartyController extends GetxController {
         creator: session.userId,
         partyName: name,
         editId: editingParty?.serverPartyId ?? '',
-        agentId: '', // No agent id source is wired up yet — see agentOptions.
+        agentId: '', // No agent id source is wired up — agent filter/field was removed from the UI.
         mobileNumber: phoneCtrl.text.trim(),
         email: emailCtrl.text.trim(),
         identification: identificationCtrl.text.trim(),
@@ -285,10 +392,17 @@ class PartyController extends GetxController {
             balance == 0 ? '' : _balanceTypeCode[formBalanceType.value]!,
       );
 
-      _applyLocally(asDraft: asDraft, balance: balance, name: name);
+      final wasCreate = editingParty == null;
       Get.back();
       Get.snackbar('Saved', result.message,
           snackPosition: SnackPosition.BOTTOM);
+      // The server is now the source of truth for this row — reload
+      // rather than splice a locally-built copy into the page. A create
+      // jumps back to page 1 since that's the most likely place to see
+      // it (assuming newest-first ordering); an edit just re-fetches
+      // the page the user was already looking at.
+      if (wasCreate) pageNo.value = 1;
+      await loadParties();
       return true;
     } on ApiRequestException catch (e) {
       // Business-rule rejection (duplicate name/mobile, invalid agent,
@@ -357,14 +471,22 @@ class PartyController extends GetxController {
     }
   }
 
+  /// There's no delete endpoint in the API we have for party.php yet —
+  /// this only removes the row from the current in-memory page, so it
+  /// will reappear next time the list is reloaded. Flagged clearly so
+  /// it isn't mistaken for an actual server-side delete.
   void deleteParty(PartyModel party) {
     parties.remove(party);
-    Get.snackbar('Deleted', '${party.name} was removed',
-        snackPosition: SnackPosition.BOTTOM);
+    Get.snackbar(
+      'Removed from view',
+      '${party.name} was removed here, but there\'s no delete API yet — it\'ll reappear on refresh.',
+      snackPosition: SnackPosition.BOTTOM,
+    );
   }
 
   @override
   void onClose() {
+    _searchDebounce?.cancel();
     nameCtrl.dispose();
     phoneCtrl.dispose();
     emailCtrl.dispose();
