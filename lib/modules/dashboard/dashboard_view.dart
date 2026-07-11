@@ -18,7 +18,8 @@ class DashboardView extends GetView<DashboardController> {
     return AppScaffold(
       routeName: AppRoutes.dashboard,
       title: 'Dashboard',
-      body: LayoutBuilder(
+      body: SizedBox(),
+      /*body: LayoutBuilder(
         builder: (context, constraints) {
           return SingleChildScrollView(
             padding: EdgeInsets.symmetric(
@@ -49,7 +50,7 @@ class DashboardView extends GetView<DashboardController> {
             ),
           );
         },
-      ),
+      ),*/
     );
   }
 

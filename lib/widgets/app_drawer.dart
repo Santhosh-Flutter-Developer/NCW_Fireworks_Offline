@@ -56,10 +56,10 @@ class _AppDrawerState extends State<AppDrawer> {
                         label: 'Party',
                         route: AppRoutes.partyList,
                       ),
-                      _subTile(
-                        label: 'Product',
-                        route: AppRoutes.productList,
-                      ),
+                      // _subTile(
+                      //   label: 'Product',
+                      //   route: AppRoutes.productList,
+                      // ),
                       _subTile(
                         label: 'Price Upload',
                         route: AppRoutes.priceUpload,

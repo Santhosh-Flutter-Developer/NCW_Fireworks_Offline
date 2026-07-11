@@ -7,15 +7,37 @@ import 'billing_item_model.dart';
 class ChargeLine {
   String name;
   double value;
-  ChargeLine({required this.name, required this.value});
+
+  /// The server's `other_charges_id`, when this line came from (or was
+  /// matched against) the API's other-charges list. Required to send the
+  /// line back on `estimate_update`.
+  String chargeId;
+
+  /// "Plus" or "Minus", as looked up from `type_other_charges_id`. Kept
+  /// alongside the already-signed [value] so the exact server value can
+  /// be resent verbatim.
+  String type;
+
+  ChargeLine({
+    required this.name,
+    required this.value,
+    this.chargeId = '',
+    this.type = 'Plus',
+  });
 }
 
 class EstimationModel {
   final String id;
   final String estimationNo;
+
+  /// The real `estimate_id` on the server, once known. `null` for rows
+  /// that only exist locally. Sent back as `edit_id` when saving.
+  String? serverEstimateId;
   String partyId;
   String partyName;
+  String agentId;
   String agentName;
+  String pricelistId;
   String pricelistName;
   DateTime date;
   List<BillingItemModel> items;
@@ -34,12 +56,21 @@ class EstimationModel {
   List<ChargeLine> charges;
   double roundOff;
 
+  /// `estimate_listing` only returns a grand total and a qty label per
+  /// row — not the full line items. When set (list-sourced rows), [total]
+  /// and [qtyLabel] read from these instead of recomputing from [items].
+  double? serverGrandTotal;
+  String? serverQtyLabel;
+
   EstimationModel({
     required this.id,
     required this.estimationNo,
+    this.serverEstimateId,
     required this.partyId,
     required this.partyName,
+    this.agentId = '',
     this.agentName = 'Direct',
+    this.pricelistId = '',
     this.pricelistName = '',
     required this.date,
     required this.items,
@@ -51,6 +82,8 @@ class EstimationModel {
     this.section2Discount = 0,
     List<ChargeLine>? charges,
     this.roundOff = 0,
+    this.serverGrandTotal,
+    this.serverQtyLabel,
   }) : charges = charges ?? [];
 
   List<BillingItemModel> get section1Items =>
@@ -67,7 +100,8 @@ class EstimationModel {
   double get adjustments =>
       (section1Add - section1Discount) + (section2Add - section2Discount);
   double get chargesTotal => charges.fold(0, (sum, c) => sum + c.value);
-  double get total => subTotal + adjustments + chargesTotal + roundOff;
+  double get total =>
+      serverGrandTotal ?? (subTotal + adjustments + chargesTotal + roundOff);
 
   /// Kept for screens/dashboards that only care about the grand total.
   double get grandTotal => total;
@@ -76,6 +110,9 @@ class EstimationModel {
 
   /// e.g. "6 Case" — matches the "Bill Qty" column on the web app.
   String get qtyLabel {
+    if (serverQtyLabel != null && serverQtyLabel!.isNotEmpty) {
+      return serverQtyLabel!;
+    }
     if (items.isEmpty) return '0';
     final unit = items.first.unit.isNotEmpty ? items.first.unit : 'Pcs';
     return '$totalQty $unit';

@@ -3,8 +3,9 @@ import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
+import '../../data/models/estimate/estimate_product_list_response_model.dart';
+import '../../data/models/estimate/id_name.dart';
 import '../../data/models/party_model.dart';
-import '../../data/models/product_model.dart';
 import '../../widgets/common_widgets.dart';
 import 'estimation_controller.dart';
 
@@ -30,7 +31,85 @@ class EstimationFormView extends GetView<EstimationController> {
             child: Container(
               decoration: BoxDecoration(gradient: AppColors.backgroundGradient),
               child: SafeArea(
-                child: ListView(
+                child: Obx(() {
+                  if (controller.isLoadingForm.value) {
+                    return Center(
+                      child: CircularProgressIndicator(color: AppColors.gold),
+                    );
+                  }
+                  return _formBody(context);
+                }),
+              ),
+            ),
+          ),
+          SafeArea(
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => controller.clearForm(),
+                          child: const Text('Clear'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => _showPreview(context),
+                          child: const Text('Preview'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+                  child: Obx(() => Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.magenta),
+                          onPressed: controller.isSaving.value
+                              ? null
+                              : () => controller.save(asDraft: true),
+                          child: const Text('Draft'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.success),
+                          onPressed: controller.isSaving.value
+                              ? null
+                              : () => controller.save(asDraft: false),
+                          child: controller.isSaving.value
+                              ? const SizedBox(
+                                  height: 18,
+                                  width: 18,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2, color: Colors.white),
+                                )
+                              : const Text('Confirm'),
+                        ),
+                      ),
+                    ],
+                  )),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _formBody(BuildContext context) {
+    return ListView(
                   padding: const EdgeInsets.fromLTRB(18, 18, 18, 160),
                   children: [
                     Obx(() => _GrandTotalBanner(total: controller.formTotal)),
@@ -112,62 +191,13 @@ class EstimationFormView extends GetView<EstimationController> {
                     const SizedBox(height: 14),
                     Obx(() => _totalsCard()),
                   ],
-                ),
-              ),
-            ),
-          ),
-          SafeArea(
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => controller.clearForm(),
-                          child: const Text('Clear'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => _showPreview(context),
-                          child: const Text('Preview'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.magenta),
-                          onPressed: () => controller.save(asDraft: true),
-                          child: const Text('Draft'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.success),
-                          onPressed: () => controller.save(asDraft: false),
-                          child: const Text('Confirm'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+    );
+  }
+
+  // The old bottomNavigationBar layout is kept commented out below for
+  // reference only — the Draft/Confirm/Clear/Preview controls now live
+  // directly in `build()`'s body Column so they stay visible above the
+  // keyboard without needing a separate bottomNavigationBar.
       // bottomNavigationBar: SafeArea(
       //   child: Column(
       //     children: [
@@ -218,8 +248,6 @@ class EstimationFormView extends GetView<EstimationController> {
       //     ],
       //   ),
       // ),
-    );
-  }
 
   // ---- Section of items -----------------------------------------------
 
@@ -458,19 +486,19 @@ class EstimationFormView extends GetView<EstimationController> {
                     child: DropdownButtonHideUnderline(
                       child: DropdownButton<String>(
                         isExpanded: true,
-                        value: controller.selectedChargeType.value,
+                        value: controller.selectedChargeId.value,
                         hint: Text('Select',
                             style: AppTextStyles.body
                                 .copyWith(color: AppColors.textMuted)),
                         dropdownColor: AppColors.surfaceElevated,
                         style: AppTextStyles.body
                             .copyWith(color: AppColors.textPrimary),
-                        items: EstimationController.chargeTypes
-                            .map((c) =>
-                                DropdownMenuItem(value: c, child: Text(c)))
+                        items: controller.otherChargesOptions
+                            .map((c) => DropdownMenuItem(
+                                value: c.id, child: Text(c.name)))
                             .toList(),
                         onChanged: (v) =>
-                            controller.selectedChargeType.value = v,
+                            controller.selectedChargeId.value = v,
                       ),
                     ),
                   )),
@@ -703,29 +731,64 @@ class EstimationFormView extends GetView<EstimationController> {
   }
 
   void _openPricelistPicker(BuildContext context) {
-    _openListSheet(
+    _openIdNameSheet(
       title: 'Select Pricelist',
-      items: controller.pricelistNames,
-      itemLabel: (e) => e,
-      onSelected: (e) => controller.selectedPricelist.value = e,
+      items: controller.pricelistOptions,
+      onSelected: (idn) => controller.selectPricelist(idn),
     );
   }
 
   void _openAgentPicker(BuildContext context) {
-    _openListSheet(
-      title: 'Select Agent',
-      items: ['Direct', ...controller.agents],
-      itemLabel: (e) => e,
-      onSelected: (e) =>
-          controller.selectedAgent.value = e == 'Direct' ? null : e,
+    Get.bottomSheet(
+      Container(
+        decoration: BoxDecoration(
+          color: AppColors.surfaceElevated,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.all(18),
+        constraints: BoxConstraints(maxHeight: Get.height * 0.6),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Select Agent', style: AppTextStyles.h3),
+            const SizedBox(height: 14),
+            Flexible(
+              child: Obx(() => ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: controller.agentOptions.length + 1,
+                    itemBuilder: (context, i) {
+                      if (i == 0) {
+                        return ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text('Direct', style: AppTextStyles.bodyStrong),
+                          onTap: () {
+                            controller.selectAgent(null);
+                            Get.back();
+                          },
+                        );
+                      }
+                      final a = controller.agentOptions[i - 1];
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(a.name, style: AppTextStyles.bodyStrong),
+                        onTap: () {
+                          controller.selectAgent(a);
+                          Get.back();
+                        },
+                      );
+                    },
+                  )),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
-  void _openListSheet({
+  void _openIdNameSheet({
     required String title,
-    required List<String> items,
-    required String Function(String) itemLabel,
-    required ValueChanged<String> onSelected,
+    required List<IdName> items,
+    required ValueChanged<IdName> onSelected,
   }) {
     Get.bottomSheet(
       Container(
@@ -741,22 +804,27 @@ class EstimationFormView extends GetView<EstimationController> {
             Text(title, style: AppTextStyles.h3),
             const SizedBox(height: 14),
             Flexible(
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: items.length,
-                itemBuilder: (context, i) {
-                  final item = items[i];
-                  return ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title:
-                        Text(itemLabel(item), style: AppTextStyles.bodyStrong),
-                    onTap: () {
-                      onSelected(item);
-                      Get.back();
-                    },
-                  );
-                },
-              ),
+              child: items.isEmpty
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 20),
+                      child: Text('Nothing available',
+                          style: AppTextStyles.caption),
+                    )
+                  : ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: items.length,
+                      itemBuilder: (context, i) {
+                        final item = items[i];
+                        return ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(item.name, style: AppTextStyles.bodyStrong),
+                          onTap: () {
+                            onSelected(item);
+                            Get.back();
+                          },
+                        );
+                      },
+                    ),
             ),
           ],
         ),
@@ -779,28 +847,30 @@ class EstimationFormView extends GetView<EstimationController> {
             Text('Select Party', style: AppTextStyles.h3),
             const SizedBox(height: 14),
             Flexible(
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: controller.parties.length,
-                itemBuilder: (context, i) {
-                  final PartyModel p = controller.parties[i];
-                  return ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: CircleAvatar(
-                      backgroundColor: AppColors.surfaceHigh,
-                      child: Text(p.initials,
-                          style: AppTextStyles.caption
-                              .copyWith(color: AppColors.textPrimary)),
-                    ),
-                    title: Text(p.name, style: AppTextStyles.bodyStrong),
-                    subtitle: Text(p.phone, style: AppTextStyles.caption),
-                    onTap: () {
-                      controller.selectedParty.value = p;
-                      Get.back();
+              child: Obx(() => ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: controller.parties.length,
+                    itemBuilder: (context, i) {
+                      final PartyModel p = controller.parties[i];
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: CircleAvatar(
+                          backgroundColor: AppColors.surfaceHigh,
+                          child: Text(p.initials,
+                              style: AppTextStyles.caption
+                                  .copyWith(color: AppColors.textPrimary)),
+                        ),
+                        title: Text(p.name, style: AppTextStyles.bodyStrong),
+                        subtitle: p.phone.isEmpty
+                            ? null
+                            : Text(p.phone, style: AppTextStyles.caption),
+                        onTap: () {
+                          controller.selectedParty.value = p;
+                          Get.back();
+                        },
+                      );
                     },
-                  );
-                },
-              ),
+                  )),
             ),
           ],
         ),
@@ -809,7 +879,13 @@ class EstimationFormView extends GetView<EstimationController> {
   }
 
   void _openProductPicker(BuildContext context) {
-    final section = 1.obs;
+    if (controller.selectedPricelistId.value == null ||
+        controller.selectedPricelistId.value!.isEmpty) {
+      Get.snackbar('Select a pricelist first',
+          'Products depend on the pricelist chosen above.',
+          snackPosition: SnackPosition.BOTTOM);
+      return;
+    }
     Get.bottomSheet(
       Container(
         decoration: BoxDecoration(
@@ -821,80 +897,60 @@ class EstimationFormView extends GetView<EstimationController> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('Select Product', style: AppTextStyles.h3),
-                Obx(() => Container(
-                      padding: const EdgeInsets.all(3),
-                      decoration: BoxDecoration(
-                        color: AppColors.surfaceHigh,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [1, 2].map((s) {
-                          final selected = section.value == s;
-                          return InkWell(
-                            borderRadius: BorderRadius.circular(8),
-                            onTap: () => section.value = s,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 6),
-                              decoration: BoxDecoration(
-                                gradient:
-                                    selected ? AppColors.goldGradient : null,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text('S$s',
-                                  style: AppTextStyles.caption.copyWith(
-                                    fontWeight: FontWeight.w700,
-                                    color: selected
-                                        ? AppColors.textOnGold
-                                        : AppColors.textSecondary,
-                                  )),
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    )),
-              ],
+            Text('Select Product', style: AppTextStyles.h3),
+            const SizedBox(height: 4),
+            Text(
+              'The section (1 or 2) is set automatically from the pricelist.',
+              style: AppTextStyles.caption.copyWith(color: AppColors.textMuted),
             ),
             const SizedBox(height: 14),
             Flexible(
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: controller.products.length,
-                itemBuilder: (context, i) {
-                  final ProductModel p = controller.products[i];
-                  return ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        gradient: AppColors.tealGradient,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Icon(Icons.celebration_rounded,
-                          color: Colors.white, size: 18),
-                    ),
-                    title: Text(p.name, style: AppTextStyles.bodyStrong),
-                    subtitle: Text(
-                      '₹${p.price.toStringAsFixed(0)} / ${p.unit}  •  Stock : ${p.currentStock}',
-                      style: AppTextStyles.caption.copyWith(
-                        color: p.needsAttention
-                            ? AppColors.danger
-                            : AppColors.textMuted,
-                      ),
-                    ),
-                    onTap: () {
-                      controller.addProductToForm(p, section: section.value);
-                      Get.back();
-                    },
+              child: Obx(() {
+                if (controller.isLoadingProducts.value) {
+                  return  Padding(
+                    padding: EdgeInsets.symmetric(vertical: 24),
+                    child: Center(
+                        child: CircularProgressIndicator(color: AppColors.gold)),
                   );
-                },
-              ),
+                }
+                if (controller.productOptions.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 20),
+                    child: Text('No products found for this pricelist',
+                        style: AppTextStyles.caption),
+                  );
+                }
+                return ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: controller.productOptions.length,
+                  itemBuilder: (context, i) {
+                    final EstimateProductOption p =
+                        controller.productOptions[i];
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          gradient: AppColors.tealGradient,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(Icons.celebration_rounded,
+                            color: Colors.white, size: 18),
+                      ),
+                      title:
+                          Text(p.productName, style: AppTextStyles.bodyStrong),
+                      onTap: () async {
+                        Get.back();
+                        await controller.addProductById(
+                          productId: p.productId,
+                          productName: p.productName,
+                        );
+                      },
+                    );
+                  },
+                );
+              }),
             ),
           ],
         ),

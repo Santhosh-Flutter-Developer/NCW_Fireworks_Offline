@@ -61,6 +61,13 @@ class EstimationListView extends GetView<EstimationController> {
             ),
             const SizedBox(height: 12),
             Obx(() {
+              if (controller.isLoadingList.value) {
+                return  Padding(
+                  padding: EdgeInsets.symmetric(vertical: 40),
+                  child: Center(
+                      child: CircularProgressIndicator(color: AppColors.gold)),
+                );
+              }
               final list = controller.pagedFiltered;
               if (list.isEmpty) {
                 return const Padding(
@@ -575,11 +582,9 @@ class _Pager extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Obx(() {
-      final total = controller.filtered.length;
-      final pages = controller.totalPages(total);
+      final countOnPage = controller.estimations.length;
+      final pages = controller.totalPages;
       final page = controller.currentPage.value;
-      final start = total == 0 ? 0 : (page - 1) * controller.pageSize.value + 1;
-      final end = (start + controller.pageSize.value - 1).clamp(0, total);
 
       return Wrap(
         alignment: WrapAlignment.spaceBetween,
@@ -588,19 +593,14 @@ class _Pager extends StatelessWidget {
         runSpacing: 8,
         children: [
           Text(
-            total == 0
-                ? 'Showing 0 entries'
-                : 'Showing $start to $end of $total entries',
+            countOnPage == 0
+                ? 'No entries on this page'
+                : 'Showing $countOnPage ${countOnPage == 1 ? 'entry' : 'entries'}',
             style: AppTextStyles.caption,
           ),
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                onPressed: page > 1 ? () => controller.goToPage(1) : null,
-                icon: const Icon(Icons.first_page_rounded, size: 18),
-              ),
               IconButton(
                 visualDensity: VisualDensity.compact,
                 onPressed:
@@ -614,7 +614,7 @@ class _Pager extends StatelessWidget {
                   gradient: AppColors.goldGradient,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Text('$page',
+                child: Text('$page / $pages',
                     style: AppTextStyles.bodyStrong
                         .copyWith(color: AppColors.textOnGold)),
               ),
@@ -623,12 +623,6 @@ class _Pager extends StatelessWidget {
                 onPressed:
                     page < pages ? () => controller.goToPage(page + 1) : null,
                 icon: const Icon(Icons.chevron_right_rounded, size: 18),
-              ),
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                onPressed:
-                    page < pages ? () => controller.goToPage(pages) : null,
-                icon: const Icon(Icons.last_page_rounded, size: 18),
               ),
             ],
           ),
