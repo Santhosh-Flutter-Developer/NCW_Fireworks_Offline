@@ -28,3 +28,10 @@ double readNum(dynamic raw) {
   if (raw is num) return raw.toDouble();
   return double.tryParse(raw.toString()) ?? 0;
 }
+
+int readIntSafe(dynamic raw) {
+  if (raw == null) return 0;
+  if (raw is int) return raw;
+  if (raw is num) return raw.toInt();
+  return int.tryParse(raw.toString()) ?? 0;
+}

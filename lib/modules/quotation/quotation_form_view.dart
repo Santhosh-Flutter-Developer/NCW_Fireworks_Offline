@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
+import 'package:ncw_fireworks/modules/quotation/quotation_product_picker_view.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../data/models/party_model.dart';
 import '../../data/models/quotation/id_name.dart';
-import '../../data/models/quotation/quotation_product_list_response_model.dart';
 import '../../widgets/common_widgets.dart';
 import '../../widgets/searchable_picker_sheet.dart';
 import 'quotation_controller.dart';
@@ -625,7 +625,8 @@ class QuotationFormView extends GetView<QuotationController> {
           snackPosition: SnackPosition.BOTTOM);
       return;
     }
-    showSearchablePickerSheet<QuotationProductOption>(
+    Get.to(() => const QuotationProductPickerView());
+    /*showSearchablePickerSheet<QuotationProductOption>(
       title: 'Select Product',
       subtitle: 'The section (1 or 2) is set automatically from the pricelist.',
       searchHint: 'Search product',
@@ -653,7 +654,7 @@ class QuotationFormView extends GetView<QuotationController> {
           productName: p.productName,
         );
       },
-    );
+    );*/
   }
 
   void _showPreview(BuildContext context) {

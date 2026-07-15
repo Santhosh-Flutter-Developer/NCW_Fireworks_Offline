@@ -2,30 +2,31 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
-import '../../data/models/estimate/estimate_product_list_response_model.dart';
+import '../../data/models/quotation/quotation_product_list_response_model.dart';
 import '../../widgets/common_widgets.dart';
-import 'estimation_controller.dart';
+import 'quotation_controller.dart';
 
 /// Full-screen (never a bottom sheet) product picker for the Add/Edit
-/// Estimate form.
+/// Quotation form.
 ///
 /// Shows every product for the currently selected pricelist with its
-/// price, unit and stock, lets the user bump quantities with +/-
-/// steppers, select as many products as they like, and commit all of
-/// them to the estimate in one "Add to Estimate" tap.
-class EstimateProductPickerView extends StatefulWidget {
-  const EstimateProductPickerView({super.key});
+/// price and unit, lets the user bump quantities with +/- steppers,
+/// select as many products as they like, and commit all of them to the
+/// quotation in one "Add to Quotation" tap.
+class QuotationProductPickerView extends StatefulWidget {
+  const QuotationProductPickerView({super.key});
 
   @override
-  State<EstimateProductPickerView> createState() =>
-      _EstimateProductPickerViewState();
+  State<QuotationProductPickerView> createState() =>
+      _QuotationProductPickerViewState();
 }
 
-class _EstimateProductPickerViewState extends State<EstimateProductPickerView> {
-  final controller = Get.find<EstimationController>();
+class _QuotationProductPickerViewState
+    extends State<QuotationProductPickerView> {
+  final controller = Get.find<QuotationController>();
 
   /// productId -> quantity picked on this screen. Nothing is written to
-  /// the estimate until "Add to Estimate" is tapped.
+  /// the quotation until "Add to Quotation" is tapped.
   final Map<String, int> _selections = {};
   String _query = '';
   bool _isGrid = true;
@@ -33,7 +34,7 @@ class _EstimateProductPickerViewState extends State<EstimateProductPickerView> {
   @override
   void initState() {
     super.initState();
-    // Pre-fill with quantities already on the estimate so reopening the
+    // Pre-fill with quantities already on the quotation so reopening the
     // picker to top up a product shows its current count, not zero.
     for (final option in controller.productOptions) {
       final existingQty = controller.quantityInFormFor(option.productId);
@@ -52,14 +53,14 @@ class _EstimateProductPickerViewState extends State<EstimateProductPickerView> {
     return sum;
   }
 
-  List<EstimateProductOption> get _filtered {
+  List<QuotationProductOption> get _filtered {
     final all = controller.productOptions;
     if (_query.isEmpty) return all;
     final q = _query.toLowerCase();
     return all.where((p) => p.productName.toLowerCase().contains(q)).toList();
   }
 
-  void _setQty(EstimateProductOption option, int qty) {
+  void _setQty(QuotationProductOption option, int qty) {
     setState(() {
       if (qty <= 0) {
         _selections.remove(option.productId);
@@ -196,7 +197,7 @@ class _EstimateProductPickerViewState extends State<EstimateProductPickerView> {
                       const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
                 ),
                 onPressed: _totalItemsSelected == 0 ? null : _confirm,
-                child: const Text('Add to Estimate'),
+                child: const Text('Add to Quotation'),
               ),
             ],
           ),
@@ -205,7 +206,7 @@ class _EstimateProductPickerViewState extends State<EstimateProductPickerView> {
     );
   }
 
-  Widget _gridView(List<EstimateProductOption> items) {
+  Widget _gridView(List<QuotationProductOption> items) {
     return GridView.builder(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
       itemCount: items.length,
@@ -223,7 +224,7 @@ class _EstimateProductPickerViewState extends State<EstimateProductPickerView> {
     );
   }
 
-  Widget _listView(List<EstimateProductOption> items) {
+  Widget _listView(List<QuotationProductOption> items) {
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
       itemCount: items.length,
@@ -295,7 +296,7 @@ class _AddOrStepper extends StatelessWidget {
 }
 
 class _ProductCard extends StatelessWidget {
-  final EstimateProductOption option;
+  final QuotationProductOption option;
   final int qty;
   final ValueChanged<int> onChanged;
   const _ProductCard(
@@ -354,7 +355,7 @@ class _ProductCard extends StatelessWidget {
 }
 
 class _ProductListTile extends StatelessWidget {
-  final EstimateProductOption option;
+  final QuotationProductOption option;
   final int qty;
   final ValueChanged<int> onChanged;
   const _ProductListTile(

@@ -543,6 +543,50 @@ class QuotationController extends GetxController {
     formItems.refresh();
   }
 
+  /// Adds/updates many products at once from the full-screen product
+  /// picker. Unlike [addProductById], this never calls the network —
+  /// `product_pricelist_id` (already loaded into [productOptions]) returns
+  /// rate/unit/discount-flag for every product, so a multi-select "Add to
+  /// Quotation" can apply all of them in one shot.
+  ///
+  /// [selections] maps `productId` -> desired quantity. A quantity of 0
+  /// or a product missing from [productOptions] is skipped.
+  void addProductsFromPicker(Map<String, int> selections) {
+    for (final entry in selections.entries) {
+      final qty = entry.value;
+      if (qty <= 0) continue;
+      final option =
+          productOptions.firstWhereOrNull((p) => p.productId == entry.key);
+      if (option == null) continue;
+
+      final section = option.productDiscount ? 1 : 2;
+
+      final existingIndex = formItems.indexWhere(
+          (i) => i.productId == option.productId && i.section == section);
+      if (existingIndex >= 0) {
+        formItems[existingIndex].quantity = qty;
+      } else {
+        formItems.add(BillingItemModel(
+          productId: option.productId,
+          productName: option.productName,
+          quantity: qty,
+          rate: option.rate,
+          unit: option.unitName.isEmpty ? 'Pcs' : option.unitName,
+          unitId: option.unitId,
+          section: section,
+        ));
+      }
+    }
+    formItems.refresh();
+  }
+
+  /// Current quantity already on the form for [productId] (any section) —
+  /// used to pre-fill the stepper when the product picker is reopened.
+  int quantityInFormFor(String productId) {
+    final match = formItems.firstWhereOrNull((i) => i.productId == productId);
+    return match?.quantity ?? 0;
+  }
+
   void updateRate(int index, double rate) {
     if (rate < 0) return;
     formItems[index].rate = rate;
