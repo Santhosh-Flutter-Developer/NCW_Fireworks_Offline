@@ -13,6 +13,7 @@ import '../../data/models/estimate/id_name.dart';
 import '../../data/models/estimation_model.dart';
 import '../../data/models/party_model.dart';
 import '../../data/respositories/estimate_repository.dart';
+import '../quotation/quotation_controller.dart';
 
 /// The 3 tabs shown above the Estimate list on the web app.
 ///
@@ -91,6 +92,15 @@ class EstimationController extends GetxController {
 
   // ---- Form state ---------------------------------------------------------
   EstimationModel? editingEstimation;
+
+  /// Set while the Add Estimate form is bootstrapped from an active
+  /// quotation (see [startConvertFromQuotation]). Sent back to the server
+  /// as `convert_quotation_id` on save, so the new estimate is linked to
+  /// its source quotation — which in turn hides that quotation's Convert/
+  /// Edit/Delete actions once the list reloads.
+  String? _convertQuotationId;
+  bool get isConvertingFromQuotation =>
+      _convertQuotationId != null && _convertQuotationId!.isNotEmpty;
   final Rx<PartyModel?> selectedParty = Rx<PartyModel?>(null);
   final Rx<String?> selectedAgent = Rx<String?>(null); // agent *name*
   final Rx<String?> selectedAgentId = Rx<String?>(null);
@@ -476,6 +486,7 @@ class EstimationController extends GetxController {
 
   void startCreate() {
     editingEstimation = null;
+    _convertQuotationId = null;
     _resetFormFields();
     isLoadingForm.value = true;
     _loadFormInit(showEstimateId: '');
@@ -483,10 +494,23 @@ class EstimationController extends GetxController {
 
   void startEdit(EstimationModel estimation) {
     editingEstimation = estimation;
+    _convertQuotationId = null;
     _resetFormFields();
     estimationDate.value = estimation.date;
     isLoadingForm.value = true;
     _loadFormInit(showEstimateId: estimation.serverEstimateId ?? estimation.id);
+  }
+
+  /// Bootstraps a brand-new Add Estimate form pre-filled from an active
+  /// quotation's own party/pricelist/agent/products — the "Convert to
+  /// Estimate" action on the Quotation list. [quotationId] is kept and
+  /// sent back as `convert_quotation_id` when the form is saved.
+  void startConvertFromQuotation(String quotationId) {
+    editingEstimation = null;
+    _convertQuotationId = quotationId;
+    _resetFormFields();
+    isLoadingForm.value = true;
+    _loadFormInit(showEstimateId: '', convertQuotationId: quotationId);
   }
 
   DateTime? _tryParseServerDate(String raw) {
@@ -500,11 +524,17 @@ class EstimationController extends GetxController {
 
   /// Bootstraps the Add/Edit Estimate form via `show_estimate_id`:
   /// dropdown data always, plus the existing estimate's own fields when
-  /// [showEstimateId] resolves to a real record.
-  Future<void> _loadFormInit({required String showEstimateId}) async {
+  /// [showEstimateId] resolves to a real record, or a source quotation's
+  /// fields when [convertQuotationId] is supplied instead.
+  Future<void> _loadFormInit({
+    required String showEstimateId,
+    String convertQuotationId = '',
+  }) async {
     try {
       final result = await _estimateRepository.getFormInitData(
-          showEstimateId: showEstimateId);
+        showEstimateId: showEstimateId,
+        convertQuotationId: convertQuotationId,
+      );
 
       pricelistOptions.assignAll(result.pricelist);
       agentOptions.assignAll(result.agentList);
@@ -765,6 +795,7 @@ class EstimationController extends GetxController {
       final result = await _estimateRepository.saveEstimate(
         creator: session.userId,
         editId: editingEstimation?.serverEstimateId ?? '',
+        convertQuotationId: _convertQuotationId ?? '',
         estimateDate: _apiDateFormat.format(estimationDate.value),
         pricelistId: selectedPricelistId.value!,
         agentId: selectedAgentId.value ?? '',
@@ -797,11 +828,21 @@ class EstimationController extends GetxController {
       );
 
       final wasCreate = editingEstimation == null;
+      final convertedQuotationId = _convertQuotationId;
+      _convertQuotationId = null;
       Get.back();
       Get.snackbar('Saved', result.message,
           snackPosition: SnackPosition.BOTTOM);
       if (wasCreate) currentPage.value = 1;
       await loadEstimates();
+      // The quotation this estimate was converted from now has its own
+      // `estimate_id` set server-side — refresh its list (if it's alive)
+      // so the Convert/Edit/Delete actions on that row disappear.
+      if (convertedQuotationId != null &&
+          convertedQuotationId.isNotEmpty &&
+          Get.isRegistered<QuotationController>()) {
+        unawaited(Get.find<QuotationController>().loadQuotations());
+      }
       return true;
     } on ApiRequestException catch (e) {
       Get.snackbar('Could not save', e.message,

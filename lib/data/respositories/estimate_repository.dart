@@ -56,12 +56,21 @@ class EstimateRepository {
   /// agent, party, other charges) plus — when [showEstimateId] is a real
   /// id — the existing estimate's own fields. Pass an empty string to get
   /// just the dropdown data for a brand-new estimate.
+  ///
+  /// [convertQuotationId], when non-empty, asks the server to prefill the
+  /// (otherwise blank) form fields from an active quotation's own party/
+  /// pricelist/agent/products instead — used to bootstrap the "Convert to
+  /// Estimate" flow from the Quotation list.
   Future<EstimateInitResponseModel> getFormInitData({
     String showEstimateId = '',
+    String convertQuotationId = '',
   }) async {
     final json = await _apiClient.postJson(
       ApiEndpoints.estimate,
-      body: {'show_estimate_id': showEstimateId},
+      body: {
+        'show_estimate_id': showEstimateId,
+        'convert_quotation_id': convertQuotationId,
+      },
     );
 
     final result = EstimateInitResponseModel.fromJson(json);
@@ -163,10 +172,15 @@ class EstimateRepository {
   }
 
   /// Creates a new estimate, or updates an existing one when [editId] is
-  /// supplied.
+  /// supplied. [convertQuotationId], when non-empty, links the new
+  /// estimate back to the source quotation — the server uses this same
+  /// key to stamp the quotation's own `estimate_id` once the estimate is
+  /// created, which is what later hides that quotation's Convert/Edit/
+  /// Delete actions.
   Future<EstimateSaveResponseModel> saveEstimate({
     required String creator,
     String editId = '',
+    String convertQuotationId = '',
     required String estimateDate, // dd-MM-yyyy
     required String pricelistId,
     String agentId = '',
@@ -182,6 +196,7 @@ class EstimateRepository {
       'estimate_update': '1',
       'creator': creator,
       'edit_id': editId,
+      'convert_quotation_id': convertQuotationId,
       'estimate_date': estimateDate,
       'pricelist_id': pricelistId,
       'agent_id': agentId,

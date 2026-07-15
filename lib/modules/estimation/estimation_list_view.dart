@@ -65,7 +65,7 @@ class EstimationListView extends GetView<EstimationController> {
             const SizedBox(height: 12),
             Obx(() {
               if (controller.isLoadingList.value) {
-                return  Padding(
+                return Padding(
                   padding: EdgeInsets.symmetric(vertical: 40),
                   child: Center(
                       child: CircularProgressIndicator(color: AppColors.gold)),
@@ -337,8 +337,8 @@ class _PartyFilterField extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 10),
             child: Text('All Partys',
-                style: AppTextStyles.bodyStrong
-                    .copyWith(color: AppColors.gold)),
+                style:
+                    AppTextStyles.bodyStrong.copyWith(color: AppColors.gold)),
           ),
         ),
       ),
@@ -355,8 +355,9 @@ class _PartyFilterField extends StatelessWidget {
               child: Text(
                 value ?? 'All Partys',
                 style: AppTextStyles.body.copyWith(
-                  color:
-                      value != null ? AppColors.textPrimary : AppColors.textMuted,
+                  color: value != null
+                      ? AppColors.textPrimary
+                      : AppColors.textMuted,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -650,15 +651,16 @@ class _ActionIcons extends StatelessWidget {
           onPressed: () => controller.downloadEstimate(estimation),
           icon: Icon(Icons.download_rounded, color: AppColors.ember, size: 18),
         ),
-        IconButton(
-          tooltip: 'Edit',
-          visualDensity: VisualDensity.compact,
-          onPressed: () {
-            controller.startEdit(estimation);
-            Get.toNamed(AppRoutes.estimationForm);
-          },
-          icon: Icon(Icons.edit_rounded, color: AppColors.teal, size: 18),
-        ),
+        if (!_isCancelled)
+          IconButton(
+            tooltip: 'Edit',
+            visualDensity: VisualDensity.compact,
+            onPressed: () {
+              controller.startEdit(estimation);
+              Get.toNamed(AppRoutes.estimationForm);
+            },
+            icon: Icon(Icons.edit_rounded, color: AppColors.teal, size: 18),
+          ),
         if (!_isCancelled)
           IconButton(
             tooltip: _isDraft ? 'Delete' : 'Cancel',

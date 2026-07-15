@@ -214,7 +214,7 @@ class _QuotationProductPickerViewState
         crossAxisCount: 2,
         mainAxisSpacing: 12,
         crossAxisSpacing: 12,
-        childAspectRatio: 0.8,
+        childAspectRatio: 0.75,
       ),
       itemBuilder: (context, i) => _ProductCard(
         option: items[i],

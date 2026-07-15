@@ -13,6 +13,8 @@ import '../../data/models/quotation/id_name.dart';
 import '../../data/models/quotation/quotation_product_list_response_model.dart';
 import '../../data/models/quotation_model.dart';
 import '../../data/respositories/quotation_repository.dart';
+import '../../routes/app_routes.dart';
+import '../estimation/estimation_controller.dart';
 
 /// The 3 tabs shown above the Quotation list on the web app.
 ///
@@ -190,6 +192,7 @@ class QuotationController extends GetxController {
           status: rowStatus,
           serverGrandTotal: item.grandTotal,
           serverQtyLabel: item.totalQuantity,
+          estimateId: item.estimateId,
         );
       }));
 
@@ -325,6 +328,26 @@ class QuotationController extends GetxController {
 
   Future<void> downloadQuotation(QuotationModel quotation) =>
       _openQuotationReport(quotation);
+
+  // ---- Convert to Estimate --------------------------------------------------
+
+  /// Opens the Add Estimate form pre-filled from [quotation]'s own party/
+  /// pricelist/products — the Convert action on an active, not-yet-
+  /// converted quotation row. Saving that form links the new estimate
+  /// back to this quotation, which then hides its Convert/Edit/Delete
+  /// actions once the list reloads.
+  void convertToEstimate(QuotationModel quotation) {
+    final id = quotation.serverQuotationId ?? quotation.id;
+    if (id.isEmpty) return;
+    // EstimationController is normally registered lazily the first time
+    // the Estimate module's own binding runs — put it directly here too,
+    // in case Convert is tapped before the user ever opens Estimate.
+    final estimationController = Get.isRegistered<EstimationController>()
+        ? Get.find<EstimationController>()
+        : Get.put(EstimationController());
+    estimationController.startConvertFromQuotation(id);
+    Get.toNamed(AppRoutes.estimationForm);
+  }
 
   // ---- Form: totals ---------------------------------------------------------
 

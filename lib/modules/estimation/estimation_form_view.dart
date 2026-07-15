@@ -25,7 +25,9 @@ class EstimationFormView extends GetView<EstimationController> {
       appBar: AppBar(
         title: Text(isEditing
             ? 'Edit Estimate - ${controller.editingEstimation!.estimationNo}'
-            : 'Add Estimate'),
+            : controller.isConvertingFromQuotation
+                ? 'Convert to Estimate'
+                : 'Add Estimate'),
       ),
       body: Column(
         children: [

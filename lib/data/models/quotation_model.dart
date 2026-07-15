@@ -31,6 +31,11 @@ class QuotationModel {
   double? serverGrandTotal;
   String? serverQtyLabel;
 
+  /// The linked estimate's id once this quotation has been converted to
+  /// an estimate — empty for quotations that haven't been converted yet.
+  /// While non-empty, the Convert/Edit/Delete row actions are hidden.
+  String estimateId;
+
   QuotationModel({
     required this.id,
     required this.quotationNo,
@@ -50,7 +55,11 @@ class QuotationModel {
     this.roundOff = 0,
     this.serverGrandTotal,
     this.serverQtyLabel,
+    this.estimateId = '',
   });
+
+  /// True once this quotation has been converted to an estimate.
+  bool get isConverted => estimateId.isNotEmpty;
 
   List<BillingItemModel> get section1Items =>
       items.where((i) => i.section == 1).toList();

@@ -65,7 +65,7 @@ class QuotationListView extends GetView<QuotationController> {
             const SizedBox(height: 12),
             Obx(() {
               if (controller.isLoadingList.value) {
-                return  Padding(
+                return Padding(
                   padding: EdgeInsets.symmetric(vertical: 40),
                   child: Center(
                       child: CircularProgressIndicator(color: AppColors.gold)),
@@ -279,8 +279,8 @@ class _PartyFilterField extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 10),
             child: Text('All Partys',
-                style: AppTextStyles.bodyStrong
-                    .copyWith(color: AppColors.gold)),
+                style:
+                    AppTextStyles.bodyStrong.copyWith(color: AppColors.gold)),
           ),
         ),
       ),
@@ -297,8 +297,9 @@ class _PartyFilterField extends StatelessWidget {
               child: Text(
                 value ?? 'All Partys',
                 style: AppTextStyles.body.copyWith(
-                  color:
-                      value != null ? AppColors.textPrimary : AppColors.textMuted,
+                  color: value != null
+                      ? AppColors.textPrimary
+                      : AppColors.textMuted,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -549,6 +550,9 @@ class _ActionIcons extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDraft = quotation.status == DocStatus.draft;
     final isCancelled = quotation.status == DocStatus.cancelled;
+    // Once a quotation has been converted (estimate_id is no longer
+    // empty), it's read-only on this screen — only Print/Download remain.
+    final isConverted = quotation.isConverted;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -565,23 +569,34 @@ class _ActionIcons extends StatelessWidget {
           icon: Icon(Icons.file_download_rounded,
               color: AppColors.skyBlue, size: 18),
         ),
-        IconButton(
-          tooltip: 'Edit',
-          visualDensity: VisualDensity.compact,
-          onPressed: () {
-            controller.startEdit(quotation);
-            Get.toNamed(AppRoutes.quotationForm);
-          },
-          icon: Icon(Icons.edit_rounded, color: AppColors.teal, size: 18),
-        ),
-        if (!isCancelled)
-          IconButton(
-            tooltip: isDraft ? 'Delete' : 'Cancel',
-            visualDensity: VisualDensity.compact,
-            onPressed: () => _confirmDelete(context, isDraft),
-            icon: Icon(Icons.delete_outline_rounded,
-                color: AppColors.danger, size: 18),
-          ),
+        if (!isConverted) ...[
+          if (!isCancelled && !isDraft)
+            IconButton(
+              tooltip: 'Convert to Estimate',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => controller.convertToEstimate(quotation),
+              icon:
+                  Icon(Icons.sync_alt_rounded, color: AppColors.gold, size: 18),
+            ),
+          if (!isCancelled)
+            IconButton(
+              tooltip: 'Edit',
+              visualDensity: VisualDensity.compact,
+              onPressed: () {
+                controller.startEdit(quotation);
+                Get.toNamed(AppRoutes.quotationForm);
+              },
+              icon: Icon(Icons.edit_rounded, color: AppColors.teal, size: 18),
+            ),
+          if (!isCancelled)
+            IconButton(
+              tooltip: isDraft ? 'Delete' : 'Cancel',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => _confirmDelete(context, isDraft),
+              icon: Icon(Icons.delete_outline_rounded,
+                  color: AppColors.danger, size: 18),
+            ),
+        ],
       ],
     );
   }

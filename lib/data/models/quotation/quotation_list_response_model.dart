@@ -14,6 +14,11 @@ class QuotationListItem {
   final String totalQuantity;
   final double grandTotal;
 
+  /// The linked estimate's id once this quotation has been converted —
+  /// empty for quotations that haven't been converted yet. Drives whether
+  /// the Convert/Edit/Delete actions show on the list row.
+  final String estimateId;
+
   const QuotationListItem({
     required this.quotationId,
     required this.quotationNumber,
@@ -21,6 +26,7 @@ class QuotationListItem {
     required this.partyNameMobileCity,
     required this.totalQuantity,
     required this.grandTotal,
+    this.estimateId = '',
   });
 
   factory QuotationListItem.fromJson(Map<String, dynamic> json) {
@@ -31,6 +37,7 @@ class QuotationListItem {
       partyNameMobileCity: json['party_name_mobile_city']?.toString() ?? '',
       totalQuantity: json['total_quantity']?.toString() ?? '',
       grandTotal: readNum(json['grand_total']),
+      estimateId: json['estimate_id']?.toString() ?? '',
     );
   }
 }
