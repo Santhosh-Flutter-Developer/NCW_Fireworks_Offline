@@ -315,8 +315,12 @@ class ReceiptController extends GetxController {
     paymentLines.clear();
   }
 
-  Future<void> startCreate() async {
+  Future<void> startCreate({String? prefillBillNumber}) async {
     _resetForm();
+    if (prefillBillNumber != null && prefillBillNumber.isNotEmpty) {
+    billNumberCtrl.value.text = prefillBillNumber;
+    billNumberCtrl.refresh();
+  }
     isLoadingForm.value = true;
     try {
       final result = await _receiptRepository.getFormInitData();
@@ -332,6 +336,9 @@ class ReceiptController extends GetxController {
     } finally {
       isLoadingForm.value = false;
     }
+     if (prefillBillNumber != null && prefillBillNumber.isNotEmpty) {
+    await lookupBillNumber();
+  }
   }
 
   /// Looks up the bill typed into "Bill Number" — mirrors the web app

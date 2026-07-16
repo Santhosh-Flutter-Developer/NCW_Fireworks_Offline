@@ -385,15 +385,21 @@ class EstimationController extends GetxController {
   /// controller: `ReceiptController` is normally registered lazily the
   /// first time the Receipt module's own binding runs, so put it directly
   /// here too in case this is tapped before Receipt has ever been opened.
+  bool _isPayReceiptInFlight = false;
   Future<void> payReceipt(EstimationModel estimation) async {
-    final receiptController = Get.isRegistered<ReceiptController>()
-        ? Get.find<ReceiptController>()
-        : Get.put(ReceiptController());
-    await receiptController.startCreate();
-    receiptController.billNumberCtrl.value.text = estimation.estimationNo;
-    receiptController.billNumberCtrl.refresh();
-    await receiptController.lookupBillNumber();
-    Get.toNamed(AppRoutes.receiptForm);
+    if (_isPayReceiptInFlight)
+      return; // ignore double taps while we're already working
+    _isPayReceiptInFlight = true;
+    try {
+      final receiptController = Get.isRegistered<ReceiptController>()
+          ? Get.find<ReceiptController>()
+          : Get.put(ReceiptController());
+      await receiptController.startCreate(
+          prefillBillNumber: estimation.estimationNo);
+      Get.toNamed(AppRoutes.receiptForm);
+    } finally {
+      _isPayReceiptInFlight = false;
+    }
   }
 
   // ---- Form: totals ---------------------------------------------------------
