@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
+import 'package:ncw_fireworks/data/models/billing_item_model.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/utils/responsive.dart';
-import '../../data/models/billing_item_model.dart';
 import '../../data/models/party_model.dart';
 import '../../data/models/receipt_model.dart';
 import '../../routes/app_routes.dart';
@@ -529,6 +529,8 @@ class _ActionIcons extends StatelessWidget {
   final ReceiptController controller;
   const _ActionIcons({required this.receipt, required this.controller});
 
+  bool get _isCancelled => receipt.status == DocStatus.cancelled;
+
   Future<void> _confirmDelete(BuildContext context) async {
     final confirmed = await Get.dialog<bool>(
       AlertDialog(
@@ -569,6 +571,7 @@ class _ActionIcons extends StatelessWidget {
           onPressed: () => controller.downloadReceipt(receipt),
           icon: Icon(Icons.download_rounded, color: AppColors.ember, size: 18),
         ),
+         if (!_isCancelled)
         IconButton(
           tooltip: 'Delete',
           visualDensity: VisualDensity.compact,

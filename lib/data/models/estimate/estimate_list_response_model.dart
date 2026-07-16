@@ -14,6 +14,7 @@ class EstimateListItem {
   final String partyNameMobileCity;
   final String totalQuantity;
   final double grandTotal;
+  final String receiptId;
 
   const EstimateListItem({
     required this.estimateId,
@@ -23,6 +24,7 @@ class EstimateListItem {
     required this.partyNameMobileCity,
     required this.totalQuantity,
     required this.grandTotal,
+    this.receiptId = '',
   });
 
   factory EstimateListItem.fromJson(Map<String, dynamic> json) {
@@ -34,6 +36,7 @@ class EstimateListItem {
       partyNameMobileCity: json['party_name_mobile_city']?.toString() ?? '',
       totalQuantity: json['total_quantity']?.toString() ?? '',
       grandTotal: readNum(json['grand_total']),
+      receiptId: json["receipt_id"]?.toString() ?? '',
     );
   }
 }
@@ -105,10 +108,8 @@ class EstimateListResponseModel {
       code: code,
       message: message,
       items: items,
-      agentList:
-          readIdNameList(head['agent_list'], 'agent_id', 'agent_name'),
-      partyList:
-          readIdNameList(head['party_list'], 'party_id', 'party_name'),
+      agentList: readIdNameList(head['agent_list'], 'agent_id', 'agent_name'),
+      partyList: readIdNameList(head['party_list'], 'party_id', 'party_name'),
     );
   }
 }

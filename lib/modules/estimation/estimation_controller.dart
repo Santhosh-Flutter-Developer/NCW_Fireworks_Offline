@@ -13,7 +13,9 @@ import '../../data/models/estimate/id_name.dart';
 import '../../data/models/estimation_model.dart';
 import '../../data/models/party_model.dart';
 import '../../data/respositories/estimate_repository.dart';
+import '../../routes/app_routes.dart';
 import '../quotation/quotation_controller.dart';
+import '../receipt/receipt_controller.dart';
 
 /// The 3 tabs shown above the Estimate list on the web app.
 ///
@@ -58,7 +60,8 @@ class EstimationController extends GetxController {
   final productOptions = <EstimateProductOption>[].obs;
   final isLoadingProducts = false.obs;
 
-  List<String> get pricelistNames => pricelistOptions.map((e) => e.name).toList();
+  List<String> get pricelistNames =>
+      pricelistOptions.map((e) => e.name).toList();
   List<String> get agents => agentOptions.map((e) => e.name).toList();
 
   /// Stock as of the last time each product was looked up via
@@ -220,18 +223,18 @@ class EstimationController extends GetxController {
         final party = _stripHtml(item.partyNameMobileCity).trim();
         final agent = _stripHtml(item.agentNameMobileCity).trim();
         return EstimationModel(
-          id: item.estimateId,
-          estimationNo: item.estimateNumber,
-          serverEstimateId: item.estimateId,
-          partyId: '',
-          partyName: party.isEmpty ? 'Direct' : party,
-          agentName: agent.isEmpty ? 'Direct' : agent,
-          date: date,
-          items: const [],
-          status: rowStatus,
-          serverGrandTotal: item.grandTotal,
-          serverQtyLabel: item.totalQuantity,
-        );
+            id: item.estimateId,
+            estimationNo: item.estimateNumber,
+            serverEstimateId: item.estimateId,
+            partyId: '',
+            partyName: party.isEmpty ? 'Direct' : party,
+            agentName: agent.isEmpty ? 'Direct' : agent,
+            date: date,
+            items: const [],
+            status: rowStatus,
+            serverGrandTotal: item.grandTotal,
+            serverQtyLabel: item.totalQuantity,
+            receiptId: item.receiptId);
       }));
 
       // No total-row/page count comes back from this endpoint — infer
@@ -374,6 +377,25 @@ class EstimationController extends GetxController {
   Future<void> downloadEstimate(EstimationModel estimation) =>
       _openEstimateReport(estimation);
 
+  // ---- Receipt shortcut -----------------------------------------------------
+
+  /// Opens Add Receipt pre-filled with this estimate's own bill number —
+  /// the Receipt icon on the Estimate list. Mirrors how `convertToEstimate`
+  /// on `QuotationController` reaches across into another module's
+  /// controller: `ReceiptController` is normally registered lazily the
+  /// first time the Receipt module's own binding runs, so put it directly
+  /// here too in case this is tapped before Receipt has ever been opened.
+  Future<void> payReceipt(EstimationModel estimation) async {
+    final receiptController = Get.isRegistered<ReceiptController>()
+        ? Get.find<ReceiptController>()
+        : Get.put(ReceiptController());
+    await receiptController.startCreate();
+    receiptController.billNumberCtrl.value.text = estimation.estimationNo;
+    receiptController.billNumberCtrl.refresh();
+    await receiptController.lookupBillNumber();
+    Get.toNamed(AppRoutes.receiptForm);
+  }
+
   // ---- Form: totals ---------------------------------------------------------
 
   double get formSection1Total => formItems
@@ -386,8 +408,7 @@ class EstimationController extends GetxController {
   double get formAdjustments =>
       (section1Add.value - section1Discount.value) +
       (section2Add.value - section2Discount.value);
-  double get formChargesTotal =>
-      charges.fold(0.0, (sum, c) => sum + c.value);
+  double get formChargesTotal => charges.fold(0.0, (sum, c) => sum + c.value);
   double get formTotal =>
       formSubTotal + formAdjustments + formChargesTotal + roundOff.value;
 
@@ -403,7 +424,8 @@ class EstimationController extends GetxController {
           snackPosition: SnackPosition.BOTTOM);
       return;
     }
-    final option = otherChargesOptions.firstWhereOrNull((c) => c.id == chargeId);
+    final option =
+        otherChargesOptions.firstWhereOrNull((c) => c.id == chargeId);
     if (option == null) return;
 
     try {
@@ -582,16 +604,13 @@ class EstimationController extends GetxController {
         }));
 
         section1Add.value = double.tryParse(detail.section1AddValue) ?? 0;
-        section1Discount.value =
-            double.tryParse(detail.section1Discount) ?? 0;
+        section1Discount.value = double.tryParse(detail.section1Discount) ?? 0;
         section2Add.value = double.tryParse(detail.section2AddValue) ?? 0;
-        section2Discount.value =
-            double.tryParse(detail.section2Discount) ?? 0;
+        section2Discount.value = double.tryParse(detail.section2Discount) ?? 0;
 
         charges.assignAll(detail.charges.map((c) {
           final magnitude = double.tryParse(c.value) ?? 0;
-          final signed =
-              c.type == 'Minus' ? -magnitude.abs() : magnitude.abs();
+          final signed = c.type == 'Minus' ? -magnitude.abs() : magnitude.abs();
           return ChargeLine(
             name: c.chargeName,
             value: signed,
@@ -635,8 +654,8 @@ class EstimationController extends GetxController {
   }) async {
     final pricelistId = selectedPricelistId.value;
     if (pricelistId == null || pricelistId.isEmpty) {
-      Get.snackbar('Select a pricelist',
-          'Choose a pricelist before adding products',
+      Get.snackbar(
+          'Select a pricelist', 'Choose a pricelist before adding products',
           snackPosition: SnackPosition.BOTTOM);
       return;
     }
@@ -651,8 +670,8 @@ class EstimationController extends GetxController {
       // lands in once saved (see estimate.php's `product_discount` check).
       final section = detail.productDiscount ? 1 : 2;
 
-      final existingIndex = formItems.indexWhere(
-          (i) => i.productId == productId && i.section == section);
+      final existingIndex = formItems
+          .indexWhere((i) => i.productId == productId && i.section == section);
       if (existingIndex >= 0) {
         formItems[existingIndex].quantity += qty;
         formItems.refresh();
@@ -799,8 +818,7 @@ class EstimationController extends GetxController {
         estimateDate: _apiDateFormat.format(estimationDate.value),
         pricelistId: selectedPricelistId.value!,
         agentId: selectedAgentId.value ?? '',
-        partyId:
-            selectedParty.value!.serverPartyId ?? selectedParty.value!.id,
+        partyId: selectedParty.value!.serverPartyId ?? selectedParty.value!.id,
         products: formItems
             .map((i) => EstimateProductLine(
                   productId: i.productId,

@@ -636,6 +636,7 @@ class _ActionIcons extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isConverted = estimation.isConverted;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -651,24 +652,34 @@ class _ActionIcons extends StatelessWidget {
           onPressed: () => controller.downloadEstimate(estimation),
           icon: Icon(Icons.download_rounded, color: AppColors.ember, size: 18),
         ),
-        if (!_isCancelled)
+        if (!isConverted) ...[
+          if (!_isCancelled && !_isDraft)
           IconButton(
-            tooltip: 'Edit',
+            tooltip: 'Receipt',
             visualDensity: VisualDensity.compact,
-            onPressed: () {
-              controller.startEdit(estimation);
-              Get.toNamed(AppRoutes.estimationForm);
-            },
-            icon: Icon(Icons.edit_rounded, color: AppColors.teal, size: 18),
+            onPressed: () => controller.payReceipt(estimation),
+            icon: Icon(Icons.receipt_long_rounded,
+                color: AppColors.skyBlue, size: 18),
           ),
-        if (!_isCancelled)
-          IconButton(
-            tooltip: _isDraft ? 'Delete' : 'Cancel',
-            visualDensity: VisualDensity.compact,
-            onPressed: () => _confirmDelete(context),
-            icon: Icon(Icons.delete_outline_rounded,
-                color: AppColors.danger, size: 18),
-          ),
+          if (!_isCancelled)
+            IconButton(
+              tooltip: 'Edit',
+              visualDensity: VisualDensity.compact,
+              onPressed: () {
+                controller.startEdit(estimation);
+                Get.toNamed(AppRoutes.estimationForm);
+              },
+              icon: Icon(Icons.edit_rounded, color: AppColors.teal, size: 18),
+            ),
+          if (!_isCancelled)
+            IconButton(
+              tooltip: _isDraft ? 'Delete' : 'Cancel',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => _confirmDelete(context),
+              icon: Icon(Icons.delete_outline_rounded,
+                  color: AppColors.danger, size: 18),
+            ),
+        ]
       ],
     );
   }

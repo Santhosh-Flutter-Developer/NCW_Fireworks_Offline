@@ -307,8 +307,8 @@ class _BillNumberField extends GetView<ReceiptController> {
           Row(
             children: [
               Expanded(
-                child: TextField(
-                  controller: controller.billNumberCtrl,
+                child: Obx(()=>TextField(
+                  controller: controller.billNumberCtrl.value,
                   textCapitalization: TextCapitalization.characters,
                   decoration:
                       const InputDecoration(hintText: 'e.g. EST021/26-27'),
@@ -317,7 +317,7 @@ class _BillNumberField extends GetView<ReceiptController> {
                     controller.lookupBillNumber();
                   },
                   onEditingComplete: controller.lookupBillNumber,
-                ),
+                ),)
               ),
               /*Obx(() => controller.isLookingUpBill.value
                   ? const SizedBox(
@@ -389,12 +389,20 @@ class _BillSummaryCard extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(label, style: AppTextStyles.body),
-          Text(value,
-              style: emphasize
-                  ? AppTextStyles.bodyStrong.copyWith(color: AppColors.gold)
-                  : AppTextStyles.bodyStrong),
+          const SizedBox(
+            width: 20,
+          ),
+          Expanded(
+            child: Text(value,
+                textAlign: TextAlign.end,
+                maxLines: 2,
+                style: emphasize
+                    ? AppTextStyles.bodyStrong.copyWith(color: AppColors.gold)
+                    : AppTextStyles.bodyStrong),
+          ),
         ],
       ),
     );

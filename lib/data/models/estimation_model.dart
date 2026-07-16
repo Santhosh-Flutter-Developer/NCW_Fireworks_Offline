@@ -62,6 +62,8 @@ class EstimationModel {
   double? serverGrandTotal;
   String? serverQtyLabel;
 
+  String receiptId;
+
   EstimationModel({
     required this.id,
     required this.estimationNo,
@@ -84,7 +86,10 @@ class EstimationModel {
     this.roundOff = 0,
     this.serverGrandTotal,
     this.serverQtyLabel,
+    this.receiptId = "",
   }) : charges = charges ?? [];
+
+  bool get isConverted => receiptId.isNotEmpty;
 
   List<BillingItemModel> get section1Items =>
       items.where((i) => i.section == 1).toList();

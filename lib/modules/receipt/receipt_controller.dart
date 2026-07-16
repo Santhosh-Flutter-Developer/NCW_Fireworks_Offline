@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
+import 'package:ncw_fireworks/modules/estimation/estimation_controller.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/constants/api_endpoints.dart';
 import '../../core/network/api_exception.dart';
@@ -72,7 +73,7 @@ class ReceiptController extends GetxController {
 
   // ---- Add Receipt form: fields ---------------------------------------------
   final Rx<DateTime> receiptDate = Rx<DateTime>(DateTime.now());
-  final billNumberCtrl = TextEditingController();
+  final billNumberCtrl = TextEditingController().obs;
   final deductionCtrl = TextEditingController();
   final narrationCtrl = TextEditingController();
 
@@ -95,15 +96,13 @@ class ReceiptController extends GetxController {
   final paymentLines = <ReceiptPaymentLine>[].obs;
 
   double get deduction => double.tryParse(deductionCtrl.text.trim()) ?? 0;
-  double get addedTotal =>
-      paymentLines.fold(0.0, (sum, l) => sum + l.amount);
+  double get addedTotal => paymentLines.fold(0.0, (sum, l) => sum + l.amount);
 
   /// Best-effort "how much of the bill is left to allocate" figure. The
   /// server doesn't expose a paid/pending breakdown on the bill-lookup
   /// call, so this only accounts for what's been added to the table in
   /// this session plus the deduction — not any receipts made earlier.
-  double get remainingForBill =>
-      billTotalAmount.value - deduction - addedTotal;
+  double get remainingForBill => billTotalAmount.value - deduction - addedTotal;
 
   @override
   void onInit() {
@@ -114,7 +113,7 @@ class ReceiptController extends GetxController {
   @override
   void onClose() {
     _searchDebounce?.cancel();
-    billNumberCtrl.dispose();
+    billNumberCtrl.value.dispose();
     deductionCtrl.dispose();
     narrationCtrl.dispose();
     amountCtrl.dispose();
@@ -135,8 +134,9 @@ class ReceiptController extends GetxController {
         filterFromDate: filterFrom.value != null
             ? _apiDateFormat.format(filterFrom.value!)
             : '',
-        filterToDate:
-            filterTo.value != null ? _apiDateFormat.format(filterTo.value!) : '',
+        filterToDate: filterTo.value != null
+            ? _apiDateFormat.format(filterTo.value!)
+            : '',
         searchText: searchQuery.value.trim(),
         filterPartyId: _partyIdForName(filterParty.value) ?? '',
         cancelled: activeTab.value == ReceiptTab.cancel ? '1' : '0',
@@ -197,7 +197,8 @@ class ReceiptController extends GetxController {
     }
   }
 
-  String _stripHtml(String raw) => raw.replaceAll(RegExp(r'<[^>]*>'), '').trim();
+  String _stripHtml(String raw) =>
+      raw.replaceAll(RegExp(r'<[^>]*>'), '').trim();
 
   /// The current page's rows, as returned by the server — the list view
   /// still calls this `visibleReceipts` to match its existing layout code.
@@ -290,7 +291,8 @@ class ReceiptController extends GetxController {
     }
   }
 
-  Future<void> printReceipt(ReceiptModel receipt) => _openReceiptReport(receipt);
+  Future<void> printReceipt(ReceiptModel receipt) =>
+      _openReceiptReport(receipt);
   Future<void> downloadReceipt(ReceiptModel receipt) =>
       _openReceiptReport(receipt);
 
@@ -298,7 +300,7 @@ class ReceiptController extends GetxController {
 
   void _resetForm() {
     receiptDate.value = DateTime.now();
-    billNumberCtrl.text = '';
+    billNumberCtrl.value.text = '';
     deductionCtrl.text = '';
     narrationCtrl.text = '';
     billLookupError.value = null;
@@ -335,7 +337,7 @@ class ReceiptController extends GetxController {
   /// Looks up the bill typed into "Bill Number" — mirrors the web app
   /// triggering this on blur/enter rather than on every keystroke.
   Future<void> lookupBillNumber() async {
-    final billNo = billNumberCtrl.text.trim();
+    final billNo = billNumberCtrl.value.text.trim();
     billLookupError.value = null;
     if (billNo.isEmpty) {
       billFoundNumber.value = '';
@@ -486,10 +488,17 @@ class ReceiptController extends GetxController {
                 ))
             .toList(),
       );
+      Get.back();
       Get.snackbar('Saved', result.message,
           snackPosition: SnackPosition.BOTTOM);
       currentPage.value = 1;
-      await loadReceipts();
+      Future.delayed(const Duration(seconds: 1), () async {
+        await loadReceipts();
+        if (Get.isRegistered<EstimationController>()) {
+          unawaited(Get.find<EstimationController>().loadEstimates());
+        }
+        
+      });
       return true;
     } on ApiRequestException catch (e) {
       Get.snackbar('Could not save', e.message,
