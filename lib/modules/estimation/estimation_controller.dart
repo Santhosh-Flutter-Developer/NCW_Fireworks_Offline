@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
+import 'package:ncw_fireworks/core/utils/pdf_downloader.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/constants/api_endpoints.dart';
 import '../../core/network/api_exception.dart';
@@ -374,8 +375,25 @@ class EstimationController extends GetxController {
   Future<void> printEstimate(EstimationModel estimation) =>
       _openEstimateReport(estimation);
 
-  Future<void> downloadEstimate(EstimationModel estimation) =>
-      _openEstimateReport(estimation);
+  Future<void> downloadEstimate(EstimationModel estimation) async {
+  final id = estimation.serverEstimateId ?? estimation.id;
+  if (id.isEmpty) {
+    Get.snackbar('Not available', 'This estimate has no report yet',
+        snackPosition: SnackPosition.BOTTOM);
+    return;
+  }
+  try {
+    await PdfDownloader.download(
+      uri: ApiEndpoints.estimateReport(id),
+      fileName: estimation.estimationNo,
+    );
+    Get.snackbar('Downloaded', 'Estimate report saved',
+        snackPosition: SnackPosition.BOTTOM);
+  } catch (e) {
+    Get.snackbar('Could not download', 'Unable to download the estimate report',
+        snackPosition: SnackPosition.BOTTOM);
+  }
+}
 
   // ---- Receipt shortcut -----------------------------------------------------
 

@@ -17,15 +17,15 @@ class ApiEndpoints {
   /// Print/download A4 PDF for one estimate — same report is used for both
   /// actions; the browser/OS's own PDF viewer offers print & save/download.
   static Uri estimateReport(String estimateId) => Uri.parse(
-      '$reportsBaseUrl/rpt_estimate_a4.php?view_estimate_id=$estimateId&from=');
+      '$reportsBaseUrl/rpt_estimate_a4.php?view_estimate_id=$estimateId&from=D');
 
   /// Print/download A4 PDF for one quotation — same report for both
   /// actions, same reasoning as [estimateReport].
   static Uri quotationReport(String quotationId) => Uri.parse(
-      '$reportsBaseUrl/rpt_quotation_a4.php?view_quotation_id=$quotationId&from=');
+      '$reportsBaseUrl/rpt_quotation_a4.php?view_quotation_id=$quotationId&from=D');
 
   /// Print/download A5 PDF for one receipt — same report for both actions,
   /// same reasoning as [estimateReport].
   static Uri receiptReport(String receiptId) => Uri.parse(
-      '$reportsBaseUrl/rpt_receipt_a5.php?view_receipt_id=$receiptId&from=');
+      '$reportsBaseUrl/rpt_receipt_a5.php?view_receipt_id=$receiptId&from=D');
 }

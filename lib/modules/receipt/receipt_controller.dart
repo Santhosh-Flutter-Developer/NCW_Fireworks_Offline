@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
+import 'package:ncw_fireworks/core/utils/pdf_downloader.dart';
 import 'package:ncw_fireworks/modules/estimation/estimation_controller.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/constants/api_endpoints.dart';
@@ -293,8 +294,19 @@ class ReceiptController extends GetxController {
 
   Future<void> printReceipt(ReceiptModel receipt) =>
       _openReceiptReport(receipt);
-  Future<void> downloadReceipt(ReceiptModel receipt) =>
-      _openReceiptReport(receipt);
+ Future<void> downloadReceipt(ReceiptModel receipt) async {
+  try {
+    await PdfDownloader.download(
+      uri: ApiEndpoints.receiptReport(receipt.id),
+      fileName: receipt.receiptNumber,
+    );
+    Get.snackbar('Downloaded', 'Receipt report saved',
+        snackPosition: SnackPosition.BOTTOM);
+  } catch (e) {
+    Get.snackbar('Could not download', 'Unable to download the receipt report',
+        snackPosition: SnackPosition.BOTTOM);
+  }
+}
 
   // ---- Add Receipt form -------------------------------------------------------
 

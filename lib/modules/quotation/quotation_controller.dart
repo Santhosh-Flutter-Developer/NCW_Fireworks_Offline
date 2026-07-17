@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
+import 'package:ncw_fireworks/core/utils/pdf_downloader.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/constants/api_endpoints.dart';
 import '../../core/network/api_exception.dart';
@@ -326,8 +327,25 @@ class QuotationController extends GetxController {
   Future<void> printQuotation(QuotationModel quotation) =>
       _openQuotationReport(quotation);
 
-  Future<void> downloadQuotation(QuotationModel quotation) =>
-      _openQuotationReport(quotation);
+  Future<void> downloadQuotation(QuotationModel quotation) async {
+  final id = quotation.serverQuotationId ?? quotation.id;
+  if (id.isEmpty) {
+    Get.snackbar('Not available', 'This quotation has no report yet',
+        snackPosition: SnackPosition.BOTTOM);
+    return;
+  }
+  try {
+    await PdfDownloader.download(
+      uri: ApiEndpoints.quotationReport(id),
+      fileName: quotation.quotationNo,
+    );
+    Get.snackbar('Downloaded', 'Quotation report saved',
+        snackPosition: SnackPosition.BOTTOM);
+  } catch (e) {
+    Get.snackbar('Could not download', 'Unable to download the quotation report',
+        snackPosition: SnackPosition.BOTTOM);
+  }
+}
 
   // ---- Convert to Estimate --------------------------------------------------
 
