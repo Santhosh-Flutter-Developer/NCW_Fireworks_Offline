@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
-import 'package:ncw_fireworks/core/utils/pdf_downloader.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/constants/api_endpoints.dart';
 import '../../core/network/api_exception.dart';
@@ -375,25 +374,8 @@ class EstimationController extends GetxController {
   Future<void> printEstimate(EstimationModel estimation) =>
       _openEstimateReport(estimation);
 
-  Future<void> downloadEstimate(EstimationModel estimation) async {
-  final id = estimation.serverEstimateId ?? estimation.id;
-  if (id.isEmpty) {
-    Get.snackbar('Not available', 'This estimate has no report yet',
-        snackPosition: SnackPosition.BOTTOM);
-    return;
-  }
-  try {
-    await PdfDownloader.download(
-      uri: ApiEndpoints.estimateReport(id),
-      fileName: estimation.estimationNo,
-    );
-    Get.snackbar('Downloaded', 'Estimate report saved',
-        snackPosition: SnackPosition.BOTTOM);
-  } catch (e) {
-    Get.snackbar('Could not download', 'Unable to download the estimate report',
-        snackPosition: SnackPosition.BOTTOM);
-  }
-}
+  Future<void> downloadEstimate(EstimationModel estimation) =>
+      _openEstimateReport(estimation);
 
   // ---- Receipt shortcut -----------------------------------------------------
 
@@ -742,6 +724,46 @@ class EstimationController extends GetxController {
           (i) => i.productId == option.productId && i.section == section);
       if (existingIndex >= 0) {
         formItems[existingIndex].quantity = qty;
+      } else {
+        formItems.add(BillingItemModel(
+          productId: option.productId,
+          productName: option.productName,
+          quantity: qty,
+          rate: option.rate,
+          unit: option.unitName.isEmpty ? 'Pcs' : option.unitName,
+          unitId: option.unitId,
+          section: section,
+        ));
+      }
+    }
+    formItems.refresh();
+  }
+
+  /// Adds/updates many products at once from the full-screen product
+  /// picker, the same as [addProductsFromPicker] — except each product
+  /// carries its *own* [EstimateProductOption] snapshot instead of being
+  /// looked up in [productOptions].
+  ///
+  /// This is what lets the picker's pricelist tab bar work: a product
+  /// picked under one pricelist tab keeps that tab's rate/unit/section
+  /// even after the user switches to another tab (which reloads
+  /// [productOptions] out from under it) and picks more products there
+  /// before finally tapping "Add to Estimate".
+  void addProductSelections(
+      List<MapEntry<EstimateProductOption, int>> selections) {
+    for (final entry in selections) {
+      final option = entry.key;
+      final qty = entry.value;
+      if (qty <= 0) continue;
+
+      _stockCache[option.productId] = option.currentStock;
+      final section = option.productDiscount ? 1 : 2;
+
+      final existingIndex = formItems.indexWhere(
+          (i) => i.productId == option.productId && i.section == section);
+      if (existingIndex >= 0) {
+        formItems[existingIndex].quantity = qty;
+        formItems[existingIndex].rate = option.rate;
       } else {
         formItems.add(BillingItemModel(
           productId: option.productId,

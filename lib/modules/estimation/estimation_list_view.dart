@@ -13,6 +13,7 @@ import '../../widgets/app_scaffold.dart';
 import '../../widgets/common_widgets.dart';
 import '../../widgets/searchable_picker_sheet.dart';
 import '../../widgets/view_mode_toggle.dart';
+import 'estimate_product_picker_view.dart';
 import 'estimation_controller.dart';
 
 class EstimationListView extends GetView<EstimationController> {
@@ -28,7 +29,10 @@ class EstimationListView extends GetView<EstimationController> {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
           controller.startCreate();
-          Get.toNamed(AppRoutes.estimationForm);
+          // New estimates start on the product picker (pricelists as
+          // tabs, products underneath) instead of the empty form — the
+          // form only appears once products have been chosen.
+          Get.to(() => const EstimateProductPickerView(isEntryPoint: true));
         },
         backgroundColor: AppColors.gold,
         foregroundColor: AppColors.textOnGold,

@@ -14,6 +14,7 @@ import '../../widgets/common_widgets.dart';
 import '../../widgets/searchable_picker_sheet.dart';
 import '../../widgets/view_mode_toggle.dart';
 import 'quotation_controller.dart';
+import 'quotation_product_picker_view.dart';
 
 class QuotationListView extends GetView<QuotationController> {
   const QuotationListView({super.key});
@@ -28,7 +29,10 @@ class QuotationListView extends GetView<QuotationController> {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
           controller.startCreate();
-          Get.toNamed(AppRoutes.quotationForm);
+          // New quotations start on the product picker (pricelists as
+          // tabs, products underneath) instead of the empty form — the
+          // form only appears once products have been chosen.
+          Get.to(() => const QuotationProductPickerView(isEntryPoint: true));
         },
         backgroundColor: AppColors.gold,
         foregroundColor: AppColors.textOnGold,

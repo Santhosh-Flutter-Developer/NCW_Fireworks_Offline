@@ -3,18 +3,35 @@ import 'package:get/get.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../data/models/estimate/estimate_product_list_response_model.dart';
+import '../../data/models/estimate/id_name.dart';
+import '../../routes/app_routes.dart';
 import '../../widgets/common_widgets.dart';
 import 'estimation_controller.dart';
+
+/// A product picked on this screen, kept alongside the exact pricelist
+/// option (rate/unit/section) it was picked under — see
+/// [EstimationController.addProductSelections].
+class _SelectedLine {
+  final EstimateProductOption option;
+  int qty;
+  _SelectedLine({required this.option, required this.qty});
+}
 
 /// Full-screen (never a bottom sheet) product picker for the Add/Edit
 /// Estimate form.
 ///
-/// Shows every product for the currently selected pricelist with its
-/// price, unit and stock, lets the user bump quantities with +/-
-/// steppers, select as many products as they like, and commit all of
-/// them to the estimate in one "Add to Estimate" tap.
+/// Pricelists are shown as a tab bar across the top; switching tabs
+/// reloads the product list for that pricelist. Products can be picked
+/// across as many tabs as needed before committing them all to the
+/// estimate in one "Add to Estimate" tap.
+///
+/// When [isEntryPoint] is true (the "Add" button on the Estimate list),
+/// this screen *is* the first step of creating an estimate: confirming
+/// here hands off straight to the Add Estimate form instead of just
+/// popping back to it.
 class EstimateProductPickerView extends StatefulWidget {
-  const EstimateProductPickerView({super.key});
+  final bool isEntryPoint;
+  const EstimateProductPickerView({super.key, this.isEntryPoint = false});
 
   @override
   State<EstimateProductPickerView> createState() =>
@@ -24,33 +41,39 @@ class EstimateProductPickerView extends StatefulWidget {
 class _EstimateProductPickerViewState extends State<EstimateProductPickerView> {
   final controller = Get.find<EstimationController>();
 
-  /// productId -> quantity picked on this screen. Nothing is written to
-  /// the estimate until "Add to Estimate" is tapped.
-  final Map<String, int> _selections = {};
+  /// productId -> selection picked on this screen (possibly spanning
+  /// several pricelist tabs). Nothing is written to the estimate until
+  /// "Add to Estimate" is tapped.
+  final Map<String, _SelectedLine> _selections = {};
   String _query = '';
   bool _isGrid = true;
 
   @override
   void initState() {
     super.initState();
-    // Pre-fill with quantities already on the estimate so reopening the
-    // picker to top up a product shows its current count, not zero.
-    for (final option in controller.productOptions) {
-      final existingQty = controller.quantityInFormFor(option.productId);
-      if (existingQty > 0) _selections[option.productId] = existingQty;
+    // Pre-fill with products already on the estimate (from any
+    // pricelist) so reopening the picker to top up shows current counts.
+    for (final item in controller.formItems) {
+      _selections[item.productId] = _SelectedLine(
+        option: EstimateProductOption(
+          productId: item.productId,
+          productName: item.productName,
+          unitId: item.unitId,
+          unitName: item.unit,
+          rate: item.rate,
+          productDiscount: item.section == 1,
+          currentStock: controller.stockFor(item.productId),
+        ),
+        qty: item.quantity,
+      );
     }
   }
 
-  int get _totalItemsSelected => _selections.values.fold(0, (a, b) => a + b);
+  int get _totalItemsSelected =>
+      _selections.values.fold(0, (a, l) => a + l.qty);
 
-  double get _totalAmountSelected {
-    double sum = 0;
-    for (final option in controller.productOptions) {
-      final qty = _selections[option.productId] ?? 0;
-      if (qty > 0) sum += qty * option.rate;
-    }
-    return sum;
-  }
+  double get _totalAmountSelected =>
+      _selections.values.fold(0.0, (sum, l) => sum + (l.qty * l.option.rate));
 
   List<EstimateProductOption> get _filtered {
     final all = controller.productOptions;
@@ -64,9 +87,14 @@ class _EstimateProductPickerViewState extends State<EstimateProductPickerView> {
       if (qty <= 0) {
         _selections.remove(option.productId);
       } else {
-        _selections[option.productId] = qty;
+        _selections[option.productId] =
+            _SelectedLine(option: option, qty: qty);
       }
     });
+  }
+
+  void _selectPricelistTab(IdName pricelist) {
+    controller.selectPricelist(pricelist);
   }
 
   void _confirm() {
@@ -75,8 +103,14 @@ class _EstimateProductPickerViewState extends State<EstimateProductPickerView> {
           snackPosition: SnackPosition.BOTTOM);
       return;
     }
-    controller.addProductsFromPicker(_selections);
-    Get.back();
+    controller.addProductSelections(
+      _selections.values.map((l) => MapEntry(l.option, l.qty)).toList(),
+    );
+    if (widget.isEntryPoint) {
+      Get.offNamed(AppRoutes.estimationForm);
+    } else {
+      Get.back();
+    }
   }
 
   @override
@@ -135,6 +169,16 @@ class _EstimateProductPickerViewState extends State<EstimateProductPickerView> {
         child: SafeArea(
           child: Column(
             children: [
+              Obx(() {
+                if (controller.pricelistOptions.isEmpty) {
+                  return const SizedBox.shrink();
+                }
+                return _PricelistTabBar(
+                  pricelists: controller.pricelistOptions,
+                  selectedId: controller.selectedPricelistId.value,
+                  onSelected: _selectPricelistTab,
+                );
+              }),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
                 child: SearchField(
@@ -144,7 +188,8 @@ class _EstimateProductPickerViewState extends State<EstimateProductPickerView> {
               ),
               Expanded(
                 child: Obx(() {
-                  if (controller.isLoadingProducts.value) {
+                  if (controller.pricelistOptions.isEmpty ||
+                      controller.isLoadingProducts.value) {
                     return Center(
                         child:
                             CircularProgressIndicator(color: AppColors.gold));
@@ -217,7 +262,7 @@ class _EstimateProductPickerViewState extends State<EstimateProductPickerView> {
       ),
       itemBuilder: (context, i) => _ProductCard(
         option: items[i],
-        qty: _selections[items[i].productId] ?? 0,
+        qty: _selections[items[i].productId]?.qty ?? 0,
         onChanged: (qty) => _setQty(items[i], qty),
       ),
     );
@@ -230,8 +275,65 @@ class _EstimateProductPickerViewState extends State<EstimateProductPickerView> {
       separatorBuilder: (_, __) => const SizedBox(height: 10),
       itemBuilder: (context, i) => _ProductListTile(
         option: items[i],
-        qty: _selections[items[i].productId] ?? 0,
+        qty: _selections[items[i].productId]?.qty ?? 0,
         onChanged: (qty) => _setQty(items[i], qty),
+      ),
+    );
+  }
+}
+
+/// Horizontally-scrollable pricelist tabs shown above the product list.
+/// Switching tabs asks the controller to load that pricelist's products —
+/// selections already made under other tabs are untouched.
+class _PricelistTabBar extends StatelessWidget {
+  final List<IdName> pricelists;
+  final String? selectedId;
+  final ValueChanged<IdName> onSelected;
+  const _PricelistTabBar({
+    required this.pricelists,
+    required this.selectedId,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 44,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+        itemCount: pricelists.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, i) {
+          final pricelist = pricelists[i];
+          final selected = pricelist.id == selectedId;
+          return InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () => onSelected(pricelist),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+              decoration: BoxDecoration(
+                gradient: selected ? AppColors.goldGradient : null,
+                color: selected ? null : AppColors.surfaceElevated,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: selected ? Colors.transparent : AppColors.divider,
+                ),
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                pricelist.name,
+                style: AppTextStyles.body.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: selected
+                      ? AppColors.textOnGold
+                      : AppColors.textSecondary,
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
