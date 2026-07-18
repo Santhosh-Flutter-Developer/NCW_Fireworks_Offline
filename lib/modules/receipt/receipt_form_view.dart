@@ -309,6 +309,7 @@ class _BillNumberField extends GetView<ReceiptController> {
               Expanded(
                 child: Obx(()=>TextField(
                   controller: controller.billNumberCtrl.value,
+                  readOnly: true,
                   textCapitalization: TextCapitalization.characters,
                   decoration:
                       const InputDecoration(hintText: 'e.g. EST021/26-27'),

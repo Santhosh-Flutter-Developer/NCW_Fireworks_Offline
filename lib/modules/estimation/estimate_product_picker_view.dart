@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
@@ -87,8 +88,7 @@ class _EstimateProductPickerViewState extends State<EstimateProductPickerView> {
       if (qty <= 0) {
         _selections.remove(option.productId);
       } else {
-        _selections[option.productId] =
-            _SelectedLine(option: option, qty: qty);
+        _selections[option.productId] = _SelectedLine(option: option, qty: qty);
       }
     });
   }
@@ -326,9 +326,8 @@ class _PricelistTabBar extends StatelessWidget {
                 pricelist.name,
                 style: AppTextStyles.body.copyWith(
                   fontWeight: FontWeight.w700,
-                  color: selected
-                      ? AppColors.textOnGold
-                      : AppColors.textSecondary,
+                  color:
+                      selected ? AppColors.textOnGold : AppColors.textSecondary,
                 ),
               ),
             ),
@@ -339,21 +338,60 @@ class _PricelistTabBar extends StatelessWidget {
   }
 }
 
-/// Shared "Add to Cart" button <-> quantity stepper, used by both the grid
+/// Shared "Add to Cart" button <-> quantity control, used by both the grid
 /// card and the list tile. A product with qty 0 shows a single button; as
-/// soon as it's tapped it turns into a -/+ stepper.
-class _AddOrStepper extends StatelessWidget {
+/// soon as it's tapped it turns into a -/+ stepper with an editable
+/// quantity field in the middle, so a large amount (50, 100, ...) can be
+/// typed directly instead of tapping + one at a time.
+class _AddOrStepper extends StatefulWidget {
   final int qty;
   final ValueChanged<int> onChanged;
   const _AddOrStepper({required this.qty, required this.onChanged});
 
   @override
+  State<_AddOrStepper> createState() => _AddOrStepperState();
+}
+
+class _AddOrStepperState extends State<_AddOrStepper> {
+  late final TextEditingController _ctrl =
+      TextEditingController(text: widget.qty > 0 ? '${widget.qty}' : '');
+  late final FocusNode _focusNode = FocusNode()
+    ..addListener(() {
+      if (!_focusNode.hasFocus) _commit();
+    });
+
+  @override
+  void didUpdateWidget(covariant _AddOrStepper old) {
+    super.didUpdateWidget(old);
+    // Keep the field in sync with external changes (+/- taps, another
+    // tab's selection being reapplied, etc.) — but never fight the user
+    // while they're actively typing in it.
+    if (!_focusNode.hasFocus && widget.qty != old.qty) {
+      _ctrl.text = widget.qty > 0 ? '${widget.qty}' : '';
+    }
+  }
+
+  void _commit() {
+    final parsed = int.tryParse(_ctrl.text.trim());
+    final qty = (parsed == null || parsed < 0) ? 0 : parsed;
+    _ctrl.text = qty > 0 ? '$qty' : '';
+    if (qty != widget.qty) widget.onChanged(qty);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (qty <= 0) {
+    if (widget.qty <= 0 && !_focusNode.hasFocus) {
       return SizedBox(
         width: double.infinity,
         child: OutlinedButton(
-          onPressed: () => onChanged(1),
+          onPressed: () => widget.onChanged(1),
           child: const Text(
             'Add to Cart',
             textAlign: TextAlign.center,
@@ -370,11 +408,26 @@ class _AddOrStepper extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          _stepBtn(
-              Icons.remove_rounded, AppColors.danger, () => onChanged(qty - 1)),
-          Text('$qty', style: AppTextStyles.bodyStrong),
-          _stepBtn(
-              Icons.add_rounded, AppColors.success, () => onChanged(qty + 1)),
+          _stepBtn(Icons.remove_rounded, AppColors.danger,
+              () => widget.onChanged(widget.qty > 0 ? widget.qty - 1 : 0)),
+          Expanded(
+            child: TextField(
+              controller: _ctrl,
+              focusNode: _focusNode,
+              textAlign: TextAlign.center,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              style: AppTextStyles.bodyStrong,
+              decoration: const InputDecoration(
+                isDense: true,
+                border: InputBorder.none,
+                contentPadding: EdgeInsets.symmetric(vertical: 4),
+              ),
+              onSubmitted: (_) => _commit(),
+            ),
+          ),
+          _stepBtn(Icons.add_rounded, AppColors.success,
+              () => widget.onChanged(widget.qty + 1)),
         ],
       ),
     );
@@ -406,50 +459,58 @@ class _ProductCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final selected = qty > 0;
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: selected ? AppColors.gold : AppColors.divider,
-          width: selected ? 1.4 : 1,
+    return GestureDetector(
+      onTap: () {
+        if (qty <= 0) {
+          onChanged(1);
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: selected ? AppColors.gold : AppColors.divider,
+            width: selected ? 1.4 : 1,
+          ),
         ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            height: 62,
-            width: double.infinity,
-            decoration: BoxDecoration(
-              gradient: AppColors.tealGradient,
-              borderRadius: BorderRadius.circular(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              height: 62,
+              width: double.infinity,
+              decoration: BoxDecoration(
+                gradient: AppColors.tealGradient,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.celebration_rounded,
+                  color: Colors.white, size: 26),
             ),
-            child: const Icon(Icons.celebration_rounded,
-                color: Colors.white, size: 26),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            option.productName,
-            style: AppTextStyles.bodyStrong,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '₹${option.rate.toStringAsFixed(2)} / ${option.unitName.isEmpty ? 'Pcs' : option.unitName}',
-            style: AppTextStyles.caption
-                .copyWith(color: AppColors.gold, fontWeight: FontWeight.w700),
-          ),
-          if (option.currentStock > 0) ...[
-            const SizedBox(height: 2),
-            Text('Stock: ${option.currentStock}', style: AppTextStyles.caption),
+            const SizedBox(height: 8),
+            Text(
+              option.productName,
+              style: AppTextStyles.bodyStrong,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '₹${option.rate.toStringAsFixed(2)} / ${option.unitName.isEmpty ? 'Pcs' : option.unitName}',
+              style: AppTextStyles.caption
+                  .copyWith(color: AppColors.gold, fontWeight: FontWeight.w700),
+            ),
+            if (option.currentStock > 0) ...[
+              const SizedBox(height: 2),
+              Text('Stock: ${option.currentStock}',
+                  style: AppTextStyles.caption),
+            ],
+            const Spacer(),
+            const SizedBox(height: 8),
+            _AddOrStepper(qty: qty, onChanged: onChanged),
           ],
-          const Spacer(),
-          const SizedBox(height: 8),
-          _AddOrStepper(qty: qty, onChanged: onChanged),
-        ],
+        ),
       ),
     );
   }
@@ -465,57 +526,64 @@ class _ProductListTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final selected = qty > 0;
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: selected ? AppColors.gold : AppColors.divider,
-          width: selected ? 1.4 : 1,
+    return GestureDetector(
+      onTap: () {
+        if (qty <= 0) {
+          onChanged(1);
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: selected ? AppColors.gold : AppColors.divider,
+            width: selected ? 1.4 : 1,
+          ),
         ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            height: 48,
-            width: 48,
-            decoration: BoxDecoration(
-              gradient: AppColors.tealGradient,
-              borderRadius: BorderRadius.circular(10),
+        child: Row(
+          children: [
+            Container(
+              height: 48,
+              width: 48,
+              decoration: BoxDecoration(
+                gradient: AppColors.tealGradient,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.celebration_rounded,
+                  color: Colors.white, size: 20),
             ),
-            child: const Icon(Icons.celebration_rounded,
-                color: Colors.white, size: 20),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  option.productName,
-                  style: AppTextStyles.bodyStrong,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  '₹${option.rate.toStringAsFixed(2)} / ${option.unitName.isEmpty ? 'Pcs' : option.unitName}',
-                  style: AppTextStyles.caption.copyWith(
-                      color: AppColors.gold, fontWeight: FontWeight.w700),
-                ),
-                if (option.currentStock > 0)
-                  Text('Stock: ${option.currentStock}',
-                      style: AppTextStyles.caption),
-              ],
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    option.productName,
+                    style: AppTextStyles.bodyStrong,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '₹${option.rate.toStringAsFixed(2)} / ${option.unitName.isEmpty ? 'Pcs' : option.unitName}',
+                    style: AppTextStyles.caption.copyWith(
+                        color: AppColors.gold, fontWeight: FontWeight.w700),
+                  ),
+                  if (option.currentStock > 0)
+                    Text('Stock: ${option.currentStock}',
+                        style: AppTextStyles.caption),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(width: 10),
-          SizedBox(
-            width: 112,
-            child: _AddOrStepper(qty: qty, onChanged: onChanged),
-          ),
-        ],
+            const SizedBox(width: 10),
+            SizedBox(
+              width: 112,
+              child: _AddOrStepper(qty: qty, onChanged: onChanged),
+            ),
+          ],
+        ),
       ),
     );
   }

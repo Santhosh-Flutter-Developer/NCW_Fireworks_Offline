@@ -25,16 +25,16 @@ class ReceiptListView extends GetView<ReceiptController> {
     return AppScaffold(
       routeName: AppRoutes.receiptList,
       title: 'Receipt',
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          controller.startCreate();
-          Get.toNamed(AppRoutes.receiptForm);
-        },
-        backgroundColor: AppColors.gold,
-        foregroundColor: AppColors.textOnGold,
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('Add'),
-      ),
+      // floatingActionButton: FloatingActionButton.extended(
+      //   onPressed: () {
+      //     controller.startCreate();
+      //     Get.toNamed(AppRoutes.receiptForm);
+      //   },
+      //   backgroundColor: AppColors.gold,
+      //   foregroundColor: AppColors.textOnGold,
+      //   icon: const Icon(Icons.add_rounded),
+      //   label: const Text('Add'),
+      // ),
       body: SingleChildScrollView(
         padding: EdgeInsets.symmetric(
           horizontal: Responsive.horizontalPadding(context),

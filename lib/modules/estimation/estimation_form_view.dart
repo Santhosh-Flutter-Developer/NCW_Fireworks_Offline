@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 import '../../core/theme/app_colors.dart';
@@ -286,6 +287,7 @@ class EstimationFormView extends GetView<EstimationController> {
   Widget _itemRow(int i) {
     final item = controller.formItems[i];
     return Container(
+      key: ValueKey('item_${item.productId}_${item.section}'),
       margin: const EdgeInsets.only(top: 10),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
@@ -326,13 +328,11 @@ class EstimationFormView extends GetView<EstimationController> {
           const SizedBox(height: 6),
           Row(
             children: [
-              _qtyStepper(
+              _QtyStepperField(
+                key: ValueKey('qty_${item.productId}_${item.section}'),
                 qty: item.quantity,
                 unit: item.unit,
-                onDecrement: () =>
-                    controller.updateQuantity(i, item.quantity - 1),
-                onIncrement: () =>
-                    controller.updateQuantity(i, item.quantity + 1),
+                onChanged: (qty) => controller.updateQuantity(i, qty),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -358,36 +358,6 @@ class EstimationFormView extends GetView<EstimationController> {
               ),
             );
           }),
-        ],
-      ),
-    );
-  }
-
-  Widget _qtyStepper({
-    required int qty,
-    required String unit,
-    required VoidCallback onDecrement,
-    required VoidCallback onIncrement,
-  }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surfaceHigh,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            onPressed: onDecrement,
-            visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.remove_rounded, size: 16),
-          ),
-          Text('$qty $unit', style: AppTextStyles.bodyStrong),
-          IconButton(
-            onPressed: onIncrement,
-            visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.add_rounded, size: 16),
-          ),
         ],
       ),
     );
@@ -885,6 +855,100 @@ class _GrandTotalBanner extends StatelessWidget {
               style: AppTextStyles.body.copyWith(color: AppColors.textOnGold)),
           Text('₹ ${total.toStringAsFixed(2)}',
               style: AppTextStyles.h3.copyWith(color: AppColors.textOnGold)),
+        ],
+      ),
+    );
+  }
+}
+/// -/+ stepper for an item row with an editable quantity field in the
+/// middle, so a large amount (50, 100, ...) can be typed directly instead
+/// of tapping + one at a time. Quantity can never go below 1 here — to
+/// remove an item entirely the row has its own "x" button.
+class _QtyStepperField extends StatefulWidget {
+  final int qty;
+  final String unit;
+  final ValueChanged<int> onChanged;
+  const _QtyStepperField(
+      {super.key, required this.qty, required this.unit, required this.onChanged});
+
+  @override
+  State<_QtyStepperField> createState() => _QtyStepperFieldState();
+}
+
+class _QtyStepperFieldState extends State<_QtyStepperField> {
+  late final TextEditingController _ctrl =
+      TextEditingController(text: '${widget.qty}');
+  late final FocusNode _focusNode = FocusNode()
+    ..addListener(() {
+      if (!_focusNode.hasFocus) _commit();
+    });
+
+  @override
+  void didUpdateWidget(covariant _QtyStepperField old) {
+    super.didUpdateWidget(old);
+    // Keep the field in sync with external changes (+/- taps) — but
+    // never fight the user while they're actively typing in it.
+    if (!_focusNode.hasFocus && widget.qty != old.qty) {
+      _ctrl.text = '${widget.qty}';
+    }
+  }
+
+  void _commit() {
+    final parsed = int.tryParse(_ctrl.text.trim());
+    final qty = (parsed == null || parsed < 1) ? 1 : parsed;
+    _ctrl.text = '$qty';
+    if (qty != widget.qty) widget.onChanged(qty);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surfaceHigh,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            onPressed: () =>
+                widget.onChanged(widget.qty > 1 ? widget.qty - 1 : 1),
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.remove_rounded, size: 16),
+          ),
+          SizedBox(
+            width: 44,
+            child: TextField(
+              controller: _ctrl,
+              focusNode: _focusNode,
+              textAlign: TextAlign.center,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              style: AppTextStyles.bodyStrong,
+              decoration: const InputDecoration(
+                isDense: true,
+                border: InputBorder.none,
+                contentPadding: EdgeInsets.symmetric(vertical: 4),
+              ),
+              onSubmitted: (_) => _commit(),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: Text(widget.unit, style: AppTextStyles.bodyStrong),
+          ),
+          IconButton(
+            onPressed: () => widget.onChanged(widget.qty + 1),
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.add_rounded, size: 16),
+          ),
         ],
       ),
     );
