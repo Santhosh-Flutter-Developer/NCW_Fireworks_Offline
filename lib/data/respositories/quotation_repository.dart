@@ -1,6 +1,13 @@
+import 'package:get/get.dart';
+
 import '../../core/constants/api_endpoints.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_exception.dart';
+import '../../core/services/cache_keys.dart';
+import '../../core/services/connectivity_service.dart';
+import '../../core/services/local_cache_service.dart';
+import '../../core/utils/offline_filter_utils.dart';
+import '../models/quotation/id_name.dart';
 import '../models/quotation/quotation_delete_response_model.dart';
 import '../models/quotation/quotation_init_response_model.dart';
 import '../models/quotation/quotation_list_response_model.dart';
@@ -31,10 +38,17 @@ class QuotationProductLine {
 /// validated result or throws a typed [ApiException] — callers never need
 /// to inspect raw response maps.
 class QuotationRepository {
-  QuotationRepository({ApiClient? apiClient})
-      : _apiClient = apiClient ?? ApiClient();
+  QuotationRepository({
+    ApiClient? apiClient,
+    ConnectivityService? connectivityService,
+    LocalCacheService? cacheService,
+  })  : _apiClient = apiClient ?? ApiClient(),
+        _connectivity = connectivityService ?? Get.find<ConnectivityService>(),
+        _cache = cacheService ?? Get.find<LocalCacheService>();
 
   final ApiClient _apiClient;
+  final ConnectivityService _connectivity;
+  final LocalCacheService _cache;
 
   /// Bootstraps the Add/Edit Quotation form: dropdown data (pricelist,
   /// party) plus — when [showQuotationId] is a real id — the existing
@@ -71,25 +85,124 @@ class QuotationRepository {
     String drafted = '0',
     String cancelled = '0',
   }) async {
-    final json = await _apiClient.postJson(
-      ApiEndpoints.quotation,
-      body: {
-        'quotation_listing': '1',
-        'filter_from_date': filterFromDate,
-        'filter_to_date': filterToDate,
-        'search_text': searchText,
-        'filter_party_id': filterPartyId,
-        'page_number': pageNumber.toString(),
-        'page_limit': pageLimit.toString(),
-        'drafted': drafted,
-        'cancelled': cancelled,
-      },
+    if (!_connectivity.isOnline.value) {
+      return _quotationsFromCache(
+        drafted: drafted,
+        cancelled: cancelled,
+        filterFromDate: filterFromDate,
+        filterToDate: filterToDate,
+        searchText: searchText,
+        filterPartyId: filterPartyId,
+        pageNumber: pageNumber,
+        pageLimit: pageLimit,
+      );
+    }
+
+    try {
+      final json = await _apiClient.postJson(
+        ApiEndpoints.quotation,
+        body: {
+          'quotation_listing': '1',
+          'filter_from_date': filterFromDate,
+          'filter_to_date': filterToDate,
+          'search_text': searchText,
+          'filter_party_id': filterPartyId,
+          'page_number': pageNumber.toString(),
+          'page_limit': pageLimit.toString(),
+          'drafted': drafted,
+          'cancelled': cancelled,
+        },
+      );
+
+      final result = QuotationListResponseModel.fromJson(json);
+      if (result.isSuccess) return result;
+
+      throw ApiRequestException(result.message);
+    } on NetworkException {
+      return _quotationsFromCache(
+        drafted: drafted,
+        cancelled: cancelled,
+        filterFromDate: filterFromDate,
+        filterToDate: filterToDate,
+        searchText: searchText,
+        filterPartyId: filterPartyId,
+        pageNumber: pageNumber,
+        pageLimit: pageLimit,
+      );
+    } on TimeoutApiException {
+      return _quotationsFromCache(
+        drafted: drafted,
+        cancelled: cancelled,
+        filterFromDate: filterFromDate,
+        filterToDate: filterToDate,
+        searchText: searchText,
+        filterPartyId: filterPartyId,
+        pageNumber: pageNumber,
+        pageLimit: pageLimit,
+      );
+    }
+  }
+
+  /// [drafted]/[cancelled] pick which cached tab snapshot to read from —
+  /// [DataSyncService] stores Active/Draft/Cancel separately, the same
+  /// split the server's `drafted`/`cancelled` flags produce.
+  QuotationListResponseModel _quotationsFromCache({
+    required String drafted,
+    required String cancelled,
+    required String filterFromDate,
+    required String filterToDate,
+    required String searchText,
+    required String filterPartyId,
+    required int pageNumber,
+    required int pageLimit,
+  }) {
+    final cacheKey = cancelled == '1'
+        ? CacheKeys.quotationCancel
+        : (drafted == '1' ? CacheKeys.quotationDraft : CacheKeys.quotationActive);
+
+    final all = _cache
+        .getJsonList(cacheKey)
+        .map(QuotationListItem.fromJson)
+        .toList();
+
+    final partyList = _cache
+        .getJsonList(CacheKeys.quotationParties)
+        .map((m) => IdName(
+              id: m['id']?.toString() ?? '',
+              name: m['name']?.toString() ?? '',
+            ))
+        .toList();
+
+    final filtered = all.where((q) {
+      if (!matchesDateRange(q.quotationDate, filterFromDate, filterToDate)) {
+        return false;
+      }
+      // The list endpoint doesn't return a per-row party id, only the
+      // combined "name / mobile / city" string, so a party filter is
+      // matched by whether that string mentions the selected party's
+      // name — good enough for offline browsing, not a strict id match.
+      if (filterPartyId.isNotEmpty) {
+        final party = partyList.where((p) => p.id == filterPartyId);
+        final partyName = party.isEmpty ? null : party.first.name;
+        if (partyName != null &&
+            !q.partyNameMobileCity
+                .toLowerCase()
+                .contains(partyName.toLowerCase())) {
+          return false;
+        }
+      }
+      return matchesSearch(searchText, [
+        q.quotationNumber,
+        q.partyNameMobileCity,
+      ]);
+    }).toList();
+
+    return QuotationListResponseModel(
+      code: 200,
+      message: 'Loaded from offline data',
+      items: paginate(filtered, pageNumber, pageLimit),
+      partyList: partyList,
     );
-
-    final result = QuotationListResponseModel.fromJson(json);
-    if (result.isSuccess) return result;
-
-    throw ApiRequestException(result.message);
   }
 
   /// Products offered under a given pricelist, for the "Add Item" picker.

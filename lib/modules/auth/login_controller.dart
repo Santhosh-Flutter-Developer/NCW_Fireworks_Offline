@@ -137,8 +137,11 @@ class LoginController extends GetxController {
       );
 
       passwordCtrl.clear();
-      await _dataSyncService.syncAll();
+      // Navigate immediately — don't make the user wait on the login
+      // screen for the sync. It keeps running in the background and the
+      // dashboard can show its progress via DataSyncService.
       Get.offAllNamed(AppRoutes.dashboard);
+      unawaited(_dataSyncService.syncAll());
     } on InvalidCredentialsException catch (e) {
       _registerFailedAttempt();
       errorText.value = e.message;

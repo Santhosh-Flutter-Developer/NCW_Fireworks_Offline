@@ -1,6 +1,13 @@
+import 'package:get/get.dart';
+
 import '../../core/constants/api_endpoints.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_exception.dart';
+import '../../core/services/cache_keys.dart';
+import '../../core/services/connectivity_service.dart';
+import '../../core/services/local_cache_service.dart';
+import '../../core/utils/offline_filter_utils.dart';
+import '../models/receipt/id_name.dart';
 import '../models/receipt/receipt_balance_response_model.dart';
 import '../models/receipt/receipt_bank_response_model.dart';
 import '../models/receipt/receipt_bill_lookup_response_model.dart';
@@ -30,9 +37,17 @@ class ReceiptPaymentEntry {
 /// validated result or throws a typed [ApiException] — callers never need
 /// to inspect raw response maps.
 class ReceiptRepository {
-  ReceiptRepository({ApiClient? apiClient}) : _apiClient = apiClient ?? ApiClient();
+  ReceiptRepository({
+    ApiClient? apiClient,
+    ConnectivityService? connectivityService,
+    LocalCacheService? cacheService,
+  })  : _apiClient = apiClient ?? ApiClient(),
+        _connectivity = connectivityService ?? Get.find<ConnectivityService>(),
+        _cache = cacheService ?? Get.find<LocalCacheService>();
 
   final ApiClient _apiClient;
+  final ConnectivityService _connectivity;
+  final LocalCacheService _cache;
 
   /// Bootstraps the Add Receipt form: today's default receipt date plus
   /// the Payment Mode dropdown options. There's no "load an existing
@@ -110,24 +125,119 @@ class ReceiptRepository {
     int pageNumber = 1,
     int pageLimit = 10,
   }) async {
-    final json = await _apiClient.postJson(
-      ApiEndpoints.receipt,
-      body: {
-        'receipt_listing': '1',
-        'filter_from_date': filterFromDate,
-        'filter_to_date': filterToDate,
-        'search_text': searchText,
-        'filter_party_id': filterPartyId,
-        'cancelled': cancelled,
-        'page_number': pageNumber.toString(),
-        'page_limit': pageLimit.toString(),
-      },
+    if (!_connectivity.isOnline.value) {
+      return _receiptsFromCache(
+        cancelled: cancelled,
+        filterFromDate: filterFromDate,
+        filterToDate: filterToDate,
+        searchText: searchText,
+        filterPartyId: filterPartyId,
+        pageNumber: pageNumber,
+        pageLimit: pageLimit,
+      );
+    }
+
+    try {
+      final json = await _apiClient.postJson(
+        ApiEndpoints.receipt,
+        body: {
+          'receipt_listing': '1',
+          'filter_from_date': filterFromDate,
+          'filter_to_date': filterToDate,
+          'search_text': searchText,
+          'filter_party_id': filterPartyId,
+          'cancelled': cancelled,
+          'page_number': pageNumber.toString(),
+          'page_limit': pageLimit.toString(),
+        },
+      );
+
+      final result = ReceiptListResponseModel.fromJson(json);
+      if (result.isSuccess) return result;
+
+      throw ApiRequestException(result.message);
+    } on NetworkException {
+      return _receiptsFromCache(
+        cancelled: cancelled,
+        filterFromDate: filterFromDate,
+        filterToDate: filterToDate,
+        searchText: searchText,
+        filterPartyId: filterPartyId,
+        pageNumber: pageNumber,
+        pageLimit: pageLimit,
+      );
+    } on TimeoutApiException {
+      return _receiptsFromCache(
+        cancelled: cancelled,
+        filterFromDate: filterFromDate,
+        filterToDate: filterToDate,
+        searchText: searchText,
+        filterPartyId: filterPartyId,
+        pageNumber: pageNumber,
+        pageLimit: pageLimit,
+      );
+    }
+  }
+
+  /// [cancelled] picks which cached tab snapshot to read from —
+  /// [DataSyncService] stores Active/Cancel separately (Receipts have no
+  /// Draft tab), the same split the server's `cancelled` flag produces.
+  ReceiptListResponseModel _receiptsFromCache({
+    required String cancelled,
+    required String filterFromDate,
+    required String filterToDate,
+    required String searchText,
+    required String filterPartyId,
+    required int pageNumber,
+    required int pageLimit,
+  }) {
+    final cacheKey =
+        cancelled == '1' ? CacheKeys.receiptCancel : CacheKeys.receiptActive;
+
+    final all = _cache
+        .getJsonList(cacheKey)
+        .map(ReceiptListItem.fromJson)
+        .toList();
+
+    final partyList = _cache
+        .getJsonList(CacheKeys.receiptParties)
+        .map((m) => IdName(
+              id: m['id']?.toString() ?? '',
+              name: m['name']?.toString() ?? '',
+            ))
+        .toList();
+
+    String? nameForId(List<IdName> options, String id) {
+      for (final o in options) {
+        if (o.id == id) return o.name;
+      }
+      return null;
+    }
+
+    final partyName =
+        filterPartyId.isEmpty ? null : nameForId(partyList, filterPartyId);
+
+    final filtered = all.where((r) {
+      if (!matchesDateRange(r.receiptDate, filterFromDate, filterToDate)) {
+        return false;
+      }
+      if (partyName != null &&
+          !r.partyName.toLowerCase().contains(partyName.toLowerCase())) {
+        return false;
+      }
+      return matchesSearch(searchText, [
+        r.receiptNumber,
+        r.partyName,
+        r.agentName,
+      ]);
+    }).toList();
+
+    return ReceiptListResponseModel(
+      code: 200,
+      message: 'Loaded from offline data',
+      items: paginate(filtered, pageNumber, pageLimit),
+      partyList: partyList,
     );
-
-    final result = ReceiptListResponseModel.fromJson(json);
-    if (result.isSuccess) return result;
-
-    throw ApiRequestException(result.message);
   }
 
   /// Creates a new Billwise Payment receipt against [againstBillNumber].
