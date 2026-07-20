@@ -24,7 +24,7 @@ class _AppDrawerState extends State<AppDrawer> {
   void _go(String route) {
     Navigator.of(context).pop();
     if (widget.currentRoute == route) return;
-    Get.offNamed(route);
+    Get.toNamed(route);
   }
 
   @override
