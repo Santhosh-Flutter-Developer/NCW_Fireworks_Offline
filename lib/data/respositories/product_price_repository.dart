@@ -26,11 +26,14 @@ class ProductPriceRepository {
   final ConnectivityService _connectivity;
   final LocalCacheService _cache;
 
+  /// [pageNumber]/[pageLimit] are optional: leave them null (as
+  /// [DataSyncService] does) to fetch the unpaginated full list, with no
+  /// `page_number`/`page_limit` sent at all.
   Future<ProductPriceListResponse> fetchPriceList({
     String pricelistId = '',
     String productId = '',
-    int pageNumber = 1,
-    int pageLimit = 10,
+    int? pageNumber,
+    int? pageLimit,
   }) async {
     if (!_connectivity.isOnline.value) {
       return _priceListFromCache(
@@ -48,8 +51,8 @@ class ProductPriceRepository {
           'product_view': '1',
           'filter_pricelist_id': pricelistId,
           'filter_product_id': productId,
-          'page_number': '$pageNumber',
-          'page_limit': '$pageLimit',
+          if (pageNumber != null) 'page_number': '$pageNumber',
+          if (pageLimit != null) 'page_limit': '$pageLimit',
         },
       );
 
@@ -85,8 +88,8 @@ class ProductPriceRepository {
   ProductPriceListResponse _priceListFromCache({
     required String pricelistId,
     required String productId,
-    required int pageNumber,
-    required int pageLimit,
+    required int? pageNumber,
+    required int? pageLimit,
   }) {
     final rows = _cache
         .getJsonList(CacheKeys.priceRows)

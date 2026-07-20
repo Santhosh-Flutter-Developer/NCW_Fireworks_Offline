@@ -115,15 +115,17 @@ class ReceiptRepository {
 
   /// Paginated, filtered Receipt list — mirrors the columns/filters on
   /// the web app's Receipt screen (from/to date, receipt number search,
-  /// party, Active/Cancel).
+  /// party, Active/Cancel). [pageNumber]/[pageLimit] are optional: leave
+  /// them null (as [DataSyncService] does) to fetch the unpaginated full
+  /// list, with no `page_number`/`page_limit` sent at all.
   Future<ReceiptListResponseModel> listReceipts({
     String filterFromDate = '',
     String filterToDate = '',
     String searchText = '',
     String filterPartyId = '',
     String cancelled = '0',
-    int pageNumber = 1,
-    int pageLimit = 10,
+    int? pageNumber,
+    int? pageLimit,
   }) async {
     if (!_connectivity.isOnline.value) {
       return _receiptsFromCache(
@@ -147,8 +149,8 @@ class ReceiptRepository {
           'search_text': searchText,
           'filter_party_id': filterPartyId,
           'cancelled': cancelled,
-          'page_number': pageNumber.toString(),
-          'page_limit': pageLimit.toString(),
+          if (pageNumber != null) 'page_number': pageNumber.toString(),
+          if (pageLimit != null) 'page_limit': pageLimit.toString(),
         },
       );
 
@@ -188,8 +190,8 @@ class ReceiptRepository {
     required String filterToDate,
     required String searchText,
     required String filterPartyId,
-    required int pageNumber,
-    required int pageLimit,
+    required int? pageNumber,
+    required int? pageLimit,
   }) {
     final cacheKey =
         cancelled == '1' ? CacheKeys.receiptCancel : CacheKeys.receiptActive;

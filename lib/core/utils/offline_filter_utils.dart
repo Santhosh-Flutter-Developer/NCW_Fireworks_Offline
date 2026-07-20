@@ -42,7 +42,11 @@ bool matchesId(String id, String filterId) =>
 
 /// Slices [items] the same way the server's `page_number`/`page_limit`
 /// would, returning an empty list past the end rather than throwing.
-List<T> paginate<T>(List<T> items, int pageNumber, int pageLimit) {
+/// If either [pageNumber] or [pageLimit] is omitted, no slicing happens
+/// at all — the full list is returned, mirroring how the online request
+/// behaves once `page_number`/`page_limit` aren't sent.
+List<T> paginate<T>(List<T> items, int? pageNumber, int? pageLimit) {
+  if (pageNumber == null || pageLimit == null) return items;
   if (pageLimit <= 0) return const [];
   final start = (pageNumber - 1) * pageLimit;
   if (start < 0 || start >= items.length) return const [];

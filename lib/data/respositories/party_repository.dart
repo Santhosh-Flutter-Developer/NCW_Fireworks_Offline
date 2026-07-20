@@ -89,12 +89,15 @@ class PartyRepository {
 
   /// Fetches a page of the party list. [agentId] is always sent as an
   /// empty string for now — there's no agent filter in the UI — and
-  /// [searchText] matches by party name.
+  /// [searchText] matches by party name. [pageNumber]/[pageLimit] are
+  /// optional: leave them null (as [DataSyncService] does) to fetch the
+  /// unpaginated full list, with no `page_number`/`page_limit` sent at
+  /// all.
   Future<PartyListResponseModel> listParties({
     String agentId = '',
     String searchText = '',
-    int pageNumber = 1,
-    int pageLimit = 10,
+    int? pageNumber,
+    int? pageLimit,
   }) async {
     if (!_connectivity.isOnline.value) {
       return _partiesFromCache(
@@ -111,8 +114,8 @@ class PartyRepository {
           'party_listing': '1',
           'filter_agent_id': agentId,
           'search_text': searchText,
-          'page_number': pageNumber.toString(),
-          'page_limit': pageLimit.toString(),
+          if (pageNumber != null) 'page_number': pageNumber.toString(),
+          if (pageLimit != null) 'page_limit': pageLimit.toString(),
         },
       );
 
@@ -145,8 +148,8 @@ class PartyRepository {
   /// today's UI, which never sets one anyway.
   PartyListResponseModel _partiesFromCache({
     required String searchText,
-    required int pageNumber,
-    required int pageLimit,
+    required int? pageNumber,
+    required int? pageLimit,
   }) {
     final all = _cache
         .getJsonList(CacheKeys.party)

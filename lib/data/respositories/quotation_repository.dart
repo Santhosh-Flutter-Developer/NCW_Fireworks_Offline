@@ -75,13 +75,16 @@ class QuotationRepository {
   /// server's WHERE clause is `drafted = '<drafted>' AND cancelled =
   /// '<cancelled>'`, so pass `'1'`/`'0'` explicitly for Active / Draft /
   /// Cancel rather than leaving them blank.
+  /// [pageNumber]/[pageLimit] are optional: leave them null (as
+  /// [DataSyncService] does) to fetch the unpaginated full list, with no
+  /// `page_number`/`page_limit` sent at all.
   Future<QuotationListResponseModel> listQuotations({
     String filterFromDate = '',
     String filterToDate = '',
     String searchText = '',
     String filterPartyId = '',
-    int pageNumber = 1,
-    int pageLimit = 10,
+    int? pageNumber,
+    int? pageLimit,
     String drafted = '0',
     String cancelled = '0',
   }) async {
@@ -107,8 +110,8 @@ class QuotationRepository {
           'filter_to_date': filterToDate,
           'search_text': searchText,
           'filter_party_id': filterPartyId,
-          'page_number': pageNumber.toString(),
-          'page_limit': pageLimit.toString(),
+          if (pageNumber != null) 'page_number': pageNumber.toString(),
+          if (pageLimit != null) 'page_limit': pageLimit.toString(),
           'drafted': drafted,
           'cancelled': cancelled,
         },
@@ -153,8 +156,8 @@ class QuotationRepository {
     required String filterToDate,
     required String searchText,
     required String filterPartyId,
-    required int pageNumber,
-    required int pageLimit,
+    required int? pageNumber,
+    required int? pageLimit,
   }) {
     final cacheKey = cancelled == '1'
         ? CacheKeys.quotationCancel

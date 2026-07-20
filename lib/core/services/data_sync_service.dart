@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:developer' as developer;
 
 import 'package:get/get.dart';
@@ -11,14 +10,18 @@ import '../../data/respositories/receipt_repository.dart';
 import 'cache_keys.dart';
 import 'local_cache_service.dart';
 
-/// Pulls the full Party / Price Upload / Quotation / Estimation / Receipt
+/// Pulls the Party / Price Upload / Quotation / Estimation / Receipt
 /// lists down from the API and caches them locally, so the rest of the
 /// app has something to work from once the connection drops.
 ///
 /// Run once, right after a *successful online* login (see
-/// `LoginController`). Every list endpoint here is server-paginated, so
-/// each section pages through with a large page size until a
-/// short-of-a-full-page response tells us we've hit the end.
+/// `LoginController`). Every list endpoint here is server-paginated, but
+/// sync deliberately never sends `page_number`/`page_limit` at all — the
+/// repositories treat both as optional and, when omitted, the endpoint
+/// returns its full list in one shot. This is exactly the "full list,
+/// no pagination" mode the backend is moving towards for sync callers;
+/// once every endpoint is confirmed to support it, nothing else here
+/// needs to change.
 ///
 /// A single section failing (timeout, server hiccup mid-sync, etc.)
 /// never throws out of [syncAll] — the user is already validly logged in
@@ -47,20 +50,6 @@ class DataSyncService extends GetxService {
   final EstimateRepository _estimateRepository;
   final ReceiptRepository _receiptRepository;
   final LocalCacheService _cache;
-
-  /// Rows per page while paging through each list end-to-end. Set high
-  /// on purpose: for a catalog this app's size, one or two requests
-  /// should cover an entire list. A small page size is what turns a few
-  /// thousand rows into dozens of slow, chatty round trips.
-  static const _pageLimit = 2000;
-
-  /// Hard cap on pages per section/tab — a safety net against an
-  /// endpoint that never returns a short page (server-side pagination
-  /// bug, ignored `page_number`, etc). With a 2,000-row page size this
-  /// still allows up to 20,000 rows per tab before giving up, while
-  /// keeping a real ceiling on requests if something server-side never
-  /// terminates the page sequence.
-  static const _maxPages = 10;
 
   final isSyncing = false.obs;
   final statusMessage = ''.obs;
@@ -102,90 +91,45 @@ class DataSyncService extends GetxService {
   }
 
   /// Updates [statusMessage] with exactly what's being synced right now
-  /// (e.g. "Syncing quotations — Draft, page 2"), for the top status
-  /// strip in [AppScaffold] to display while [isSyncing] is true.
+  /// (e.g. "Syncing quotations — Draft"), for the top status strip in
+  /// [AppScaffold] to display while [isSyncing] is true.
   void _announce(String message) {
     statusMessage.value = message;
   }
 
-  /// Whether [page] looks like the *same* page as [previous] — same
-  /// number of rows and identical first/last row content. A server that
-  /// ignores `page_number` (or has some other pagination bug) tends to
-  /// keep returning a full page of identical rows forever; this catches
-  /// that after a single repeat instead of hammering it for
-  /// [_maxPages] requests every single sync.
-  bool _isRepeatedPage(
-    List<Map<String, dynamic>>? previous,
-    List<Map<String, dynamic>> page,
-  ) {
-    if (previous == null) return false;
-    if (previous.length != page.length) return false;
-    if (page.isEmpty) return false;
-    return jsonEncode(previous.first) == jsonEncode(page.first) &&
-        jsonEncode(previous.last) == jsonEncode(page.last);
-  }
-
   Future<void> _syncParties() async {
-    final items = <Map<String, dynamic>>[];
-    List<Map<String, dynamic>>? previousPage;
-    var page = 1;
-    while (page <= _maxPages) {
-      _announce('Syncing parties — page $page');
-      final result = await _partyRepository.listParties(
-        pageNumber: page,
-        pageLimit: _pageLimit,
-      );
-      final pageItems = result.items
-          .map((p) => {
-                'party_id': p.partyId,
-                'party_name': p.partyName,
-                'state': p.state,
-              })
-          .toList();
-      if (pageItems.isEmpty || _isRepeatedPage(previousPage, pageItems)) break;
-      items.addAll(pageItems);
-      if (pageItems.length < _pageLimit) break;
-      previousPage = pageItems;
-      page++;
-    }
+    _announce('Syncing parties');
+    final result = await _partyRepository.listParties();
+    final items = result.items
+        .map((p) => {
+              'party_id': p.partyId,
+              'party_name': p.partyName,
+              'state': p.state,
+            })
+        .toList();
     await _cache.putJsonList(CacheKeys.party, items);
   }
 
   Future<void> _syncPriceList() async {
-    final rows = <Map<String, dynamic>>[];
+    _announce('Syncing price list');
     final pricelists = <String, Map<String, dynamic>>{};
     final products = <String, Map<String, dynamic>>{};
-    List<Map<String, dynamic>>? previousPage;
-    var page = 1;
-    while (page <= _maxPages) {
-      _announce('Syncing price list — page $page');
-      final result = await _productPriceRepository.fetchPriceList(
-        pageNumber: page,
-        pageLimit: _pageLimit,
-      );
-      final pageRows = result.rows
-          .map((r) => {
-                'sno': r.sno,
-                'pricelist_name': r.pricelistName,
-                'product_name': r.productName,
-                'price': r.price,
-                'price_unit_name': r.unit,
-                'discount': r.discountEnabled ? 'ON' : 'OFF',
-              })
-          .toList();
-
-      for (final p in result.pricelists) {
-        pricelists[p.id] = {'pricelist_id': p.id, 'pricelist_name': p.name};
-      }
-      for (final p in result.products) {
-        products[p.id] = {'product_id': p.id, 'product_name': p.name};
-      }
-
-      if (pageRows.isEmpty || _isRepeatedPage(previousPage, pageRows)) break;
-      rows.addAll(pageRows);
-      if (pageRows.length < _pageLimit) break;
-      previousPage = pageRows;
-      page++;
+    final result = await _productPriceRepository.fetchPriceList();
+    final rows = result.rows
+        .map((r) => {
+              'sno': r.sno,
+              'pricelist_name': r.pricelistName,
+              'product_name': r.productName,
+              'price': r.price,
+              'price_unit_name': r.unit,
+              'discount': r.discountEnabled ? 'ON' : 'OFF',
+            })
+        .toList();
+    for (final p in result.pricelists) {
+      pricelists[p.id] = {'pricelist_id': p.id, 'pricelist_name': p.name};
+    }
+    for (final p in result.products) {
+      products[p.id] = {'product_id': p.id, 'product_name': p.name};
     }
     await _cache.putJsonList(CacheKeys.priceRows, rows);
     await _cache.putJsonList(
@@ -202,38 +146,24 @@ class DataSyncService extends GetxService {
       required String drafted,
       required String cancelled,
     }) async {
-      final items = <Map<String, dynamic>>[];
-      List<Map<String, dynamic>>? previousPage;
-      var page = 1;
-      while (page <= _maxPages) {
-        _announce('Syncing quotations — $tabLabel, page $page');
-        final result = await _quotationRepository.listQuotations(
-          pageNumber: page,
-          pageLimit: _pageLimit,
-          drafted: drafted,
-          cancelled: cancelled,
-        );
-        final pageItems = result.items
-            .map((q) => {
-                  'quotation_id': q.quotationId,
-                  'quotation_number': q.quotationNumber,
-                  'quotation_date': q.quotationDate,
-                  'party_name_mobile_city': q.partyNameMobileCity,
-                  'total_quantity': q.totalQuantity,
-                  'grand_total': q.grandTotal,
-                  'estimate_id': q.estimateId,
-                })
-            .toList();
-        for (final p in result.partyList) {
-          parties[p.id] = {'id': p.id, 'name': p.name};
-        }
-        if (pageItems.isEmpty || _isRepeatedPage(previousPage, pageItems)) {
-          break;
-        }
-        items.addAll(pageItems);
-        if (pageItems.length < _pageLimit) break;
-        previousPage = pageItems;
-        page++;
+      _announce('Syncing quotations — $tabLabel');
+      final result = await _quotationRepository.listQuotations(
+        drafted: drafted,
+        cancelled: cancelled,
+      );
+      final items = result.items
+          .map((q) => {
+                'quotation_id': q.quotationId,
+                'quotation_number': q.quotationNumber,
+                'quotation_date': q.quotationDate,
+                'party_name_mobile_city': q.partyNameMobileCity,
+                'total_quantity': q.totalQuantity,
+                'grand_total': q.grandTotal,
+                'estimate_id': q.estimateId,
+              })
+          .toList();
+      for (final p in result.partyList) {
+        parties[p.id] = {'id': p.id, 'name': p.name};
       }
       await _cache.putJsonList(cacheKey, items);
     }
@@ -259,42 +189,28 @@ class DataSyncService extends GetxService {
       required String drafted,
       required String cancelled,
     }) async {
-      final items = <Map<String, dynamic>>[];
-      List<Map<String, dynamic>>? previousPage;
-      var page = 1;
-      while (page <= _maxPages) {
-        _announce('Syncing estimations — $tabLabel, page $page');
-        final result = await _estimateRepository.listEstimates(
-          pageNumber: page,
-          pageLimit: _pageLimit,
-          drafted: drafted,
-          cancelled: cancelled,
-        );
-        final pageItems = result.items
-            .map((e) => {
-                  'estimate_id': e.estimateId,
-                  'estimate_number': e.estimateNumber,
-                  'estimate_date': e.estimateDate,
-                  'agent_name_mobile_city': e.agentNameMobileCity,
-                  'party_name_mobile_city': e.partyNameMobileCity,
-                  'total_quantity': e.totalQuantity,
-                  'grand_total': e.grandTotal,
-                  'receipt_id': e.receiptId,
-                })
-            .toList();
-        for (final a in result.agentList) {
-          agents[a.id] = {'id': a.id, 'name': a.name};
-        }
-        for (final p in result.partyList) {
-          parties[p.id] = {'id': p.id, 'name': p.name};
-        }
-        if (pageItems.isEmpty || _isRepeatedPage(previousPage, pageItems)) {
-          break;
-        }
-        items.addAll(pageItems);
-        if (pageItems.length < _pageLimit) break;
-        previousPage = pageItems;
-        page++;
+      _announce('Syncing estimations — $tabLabel');
+      final result = await _estimateRepository.listEstimates(
+        drafted: drafted,
+        cancelled: cancelled,
+      );
+      final items = result.items
+          .map((e) => {
+                'estimate_id': e.estimateId,
+                'estimate_number': e.estimateNumber,
+                'estimate_date': e.estimateDate,
+                'agent_name_mobile_city': e.agentNameMobileCity,
+                'party_name_mobile_city': e.partyNameMobileCity,
+                'total_quantity': e.totalQuantity,
+                'grand_total': e.grandTotal,
+                'receipt_id': e.receiptId,
+              })
+          .toList();
+      for (final a in result.agentList) {
+        agents[a.id] = {'id': a.id, 'name': a.name};
+      }
+      for (final p in result.partyList) {
+        parties[p.id] = {'id': p.id, 'name': p.name};
       }
       await _cache.putJsonList(cacheKey, items);
     }
@@ -320,36 +236,22 @@ class DataSyncService extends GetxService {
       String tabLabel, {
       required String cancelled,
     }) async {
-      final items = <Map<String, dynamic>>[];
-      List<Map<String, dynamic>>? previousPage;
-      var page = 1;
-      while (page <= _maxPages) {
-        _announce('Syncing receipts — $tabLabel, page $page');
-        final result = await _receiptRepository.listReceipts(
-          pageNumber: page,
-          pageLimit: _pageLimit,
-          cancelled: cancelled,
-        );
-        final pageItems = result.items
-            .map((r) => {
-                  'receipt_id': r.receiptId,
-                  'receipt_number': r.receiptNumber,
-                  'receipt_date': r.receiptDate,
-                  'agent_name': r.agentName,
-                  'party_name': r.partyName,
-                  'total_amount': r.totalAmount,
-                })
-            .toList();
-        for (final p in result.partyList) {
-          parties[p.id] = {'id': p.id, 'name': p.name};
-        }
-        if (pageItems.isEmpty || _isRepeatedPage(previousPage, pageItems)) {
-          break;
-        }
-        items.addAll(pageItems);
-        if (pageItems.length < _pageLimit) break;
-        previousPage = pageItems;
-        page++;
+      _announce('Syncing receipts — $tabLabel');
+      final result = await _receiptRepository.listReceipts(
+        cancelled: cancelled,
+      );
+      final items = result.items
+          .map((r) => {
+                'receipt_id': r.receiptId,
+                'receipt_number': r.receiptNumber,
+                'receipt_date': r.receiptDate,
+                'agent_name': r.agentName,
+                'party_name': r.partyName,
+                'total_amount': r.totalAmount,
+              })
+          .toList();
+      for (final p in result.partyList) {
+        parties[p.id] = {'id': p.id, 'name': p.name};
       }
       await _cache.putJsonList(cacheKey, items);
     }

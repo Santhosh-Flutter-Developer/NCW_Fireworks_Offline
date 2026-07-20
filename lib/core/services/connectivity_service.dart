@@ -3,10 +3,12 @@ import 'dart:io';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../constants/api_endpoints.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_text_styles.dart';
 
 /// Tracks whether the device currently has network access.
 ///
@@ -52,10 +54,56 @@ class ConnectivityService extends GetxService {
     Get.closeAllSnackbars();
     Get.snackbar(
       '',
-      "You're in offline",
+      '',
+      titleText: const SizedBox.shrink(),
+      messageText: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: AppColors.danger.withOpacity(0.16),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.wifi_off_rounded,
+              size: 18,
+              color: AppColors.danger,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text("You're offline", style: AppTextStyles.bodyStrong),
+                const SizedBox(height: 2),
+                Text(
+                  'Showing saved data until you reconnect',
+                  style: AppTextStyles.caption,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      backgroundColor: AppColors.surfaceHigh,
+      boxShadows: [
+        BoxShadow(
+          color: Colors.black.withOpacity(0.25),
+          blurRadius: 16,
+          offset: const Offset(0, 6),
+        ),
+      ],
+      borderRadius: 14,
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      padding: const EdgeInsets.fromLTRB(12, 12, 16, 12),
       snackPosition: SnackPosition.BOTTOM,
-      duration: const Duration(seconds: 2),
+      duration: const Duration(seconds: 3),
       isDismissible: true,
+      forwardAnimationCurve: Curves.easeOutCubic,
+      reverseAnimationCurve: Curves.easeInCubic,
     );
   }
 
