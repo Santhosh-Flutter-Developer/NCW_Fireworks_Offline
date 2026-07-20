@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'core/services/connectivity_service.dart';
+import 'core/services/data_sync_service.dart';
+import 'core/services/local_cache_service.dart';
+import 'core/services/offline_credential_service.dart';
 import 'core/services/session_service.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_controller.dart';
@@ -26,6 +30,27 @@ Future<void> main() async {
     () => SessionService().init(),
     permanent: true,
   );
+
+  // Offline-support services, all registered before the first frame:
+  // - LocalCacheService: on-device store for the party/price/quotation/
+  //   estimation/receipt lists.
+  // - ConnectivityService: online/offline + real internet-reachability
+  //   checks, used to decide whether login can happen offline.
+  // - OfflineCredentialService: salted-hash credential store that gates
+  //   offline login (populated on online login, cleared on logout).
+  // - DataSyncService: pulls the lists down into LocalCacheService right
+  //   after a successful online login.
+  await Get.putAsync<LocalCacheService>(
+    () => LocalCacheService().init(),
+    permanent: true,
+  );
+  await Get.putAsync<ConnectivityService>(
+    () => ConnectivityService().init(),
+    permanent: true,
+  );
+  Get.put<OfflineCredentialService>(OfflineCredentialService(),
+      permanent: true);
+  Get.put<DataSyncService>(DataSyncService(), permanent: true);
 
   runApp(
     NcwFireworksApp(

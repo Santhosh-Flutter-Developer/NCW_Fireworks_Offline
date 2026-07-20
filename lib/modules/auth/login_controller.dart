@@ -5,6 +5,9 @@ import 'package:get/get.dart';
 import 'package:ncw_fireworks/data/respositories/auth_repository.dart';
 
 import '../../core/network/api_exception.dart';
+import '../../core/services/connectivity_service.dart';
+import '../../core/services/data_sync_service.dart';
+import '../../core/services/offline_credential_service.dart';
 import '../../core/services/session_service.dart';
 import '../../core/utils/validators.dart';
 import '../../data/models/auth/auth_session_model.dart';
@@ -14,11 +17,27 @@ class LoginController extends GetxController {
   LoginController({
     AuthRepository? authRepository,
     SessionService? sessionService,
+    ConnectivityService? connectivityService,
+    OfflineCredentialService? offlineCredentialService,
+    DataSyncService? dataSyncService,
   })  : _authRepository = authRepository ?? AuthRepository(),
-        _sessionService = sessionService ?? Get.find<SessionService>();
+        _sessionService = sessionService ?? Get.find<SessionService>(),
+        _connectivityService =
+            connectivityService ?? Get.find<ConnectivityService>(),
+        _offlineCredentialService =
+            offlineCredentialService ?? Get.find<OfflineCredentialService>(),
+        _dataSyncService = dataSyncService ?? Get.find<DataSyncService>();
 
   final AuthRepository _authRepository;
   final SessionService _sessionService;
+  final ConnectivityService _connectivityService;
+  final OfflineCredentialService _offlineCredentialService;
+  final DataSyncService _dataSyncService;
+
+  /// Mirrors [DataSyncService.statusMessage] so the login screen can show
+  /// what's happening while the post-login sync runs, without the view
+  /// needing to know about [DataSyncService] directly.
+  RxString get syncStatus => _dataSyncService.statusMessage;
 
   final usernameCtrl = TextEditingController(text: '');
   final passwordCtrl = TextEditingController(text: '');
@@ -71,6 +90,26 @@ class LoginController extends GetxController {
 
     isLoading.value = true;
     try {
+      // Real internet-reachability check (not just "a Wi-Fi/mobile
+      // interface is up") decides which path we take. First-ever login
+      // on a device always needs this to succeed, since there's no
+      // offline credential yet to fall back on.
+      final online = await _connectivityService.hasInternetAccess();
+      if (online) {
+        await _loginOnline(username: username, password: password);
+      } else {
+        await _loginOffline(username: username, password: password);
+      }
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  Future<void> _loginOnline({
+    required String username,
+    required String password,
+  }) async {
+    try {
       final result = await _authRepository.login(
         username: username,
         password: password,
@@ -79,28 +118,81 @@ class LoginController extends GetxController {
       _failedAttempts = 0;
       _lockedUntil = null;
 
-      await _sessionService.saveSession(
-        AuthSessionModel(
-          userId: result.userId!,
-          name: result.name ?? username,
-          loggedInAt: DateTime.now(),
-        ),
+      final session = AuthSessionModel(
+        userId: result.userId!,
+        name: result.name ?? username,
+        loggedInAt: DateTime.now(),
+      );
+      await _sessionService.saveSession(session);
+
+      // Remember this login for offline use next time, and pull down
+      // the party/price/quotation/estimation/receipt lists while we
+      // still have a connection. syncAll() swallows its own errors —
+      // it never blocks getting into the app.
+      await _offlineCredentialService.save(
+        username: username,
+        password: password,
+        userId: session.userId,
+        name: session.name,
       );
 
       passwordCtrl.clear();
+      await _dataSyncService.syncAll();
       Get.offAllNamed(AppRoutes.dashboard);
     } on InvalidCredentialsException catch (e) {
       _registerFailedAttempt();
       errorText.value = e.message;
+    } on NetworkException {
+      // Connectivity dropped between our pre-check and the actual
+      // request — fall back to an offline login attempt instead of
+      // just failing outright.
+      await _loginOffline(
+        username: username,
+        password: password,
+        connectionDroppedMidRequest: true,
+      );
     } on ApiException catch (e) {
-      // Network/timeout/server/parsing failures — don't count these
-      // against the lockout counter, they're not guessing attempts.
+      // Timeout/server/parsing failures — don't count these against the
+      // lockout counter, they're not guessing attempts.
       errorText.value = e.message;
     } catch (_) {
       errorText.value = 'Something went wrong. Please try again.';
-    } finally {
-      isLoading.value = false;
     }
+  }
+
+  Future<void> _loginOffline({
+    required String username,
+    required String password,
+    bool connectionDroppedMidRequest = false,
+  }) async {
+    final credential = await _offlineCredentialService.verify(
+      username: username,
+      password: password,
+    );
+
+    if (credential == null) {
+      _registerFailedAttempt();
+      errorText.value = connectionDroppedMidRequest
+          ? 'Lost connection while signing in, and no offline account is '
+              'saved on this device yet. Please reconnect and try again.'
+          : 'No internet connection. Connect to the internet and sign in '
+              'at least once before you can log in offline.';
+      return;
+    }
+
+    _failedAttempts = 0;
+    _lockedUntil = null;
+
+    await _sessionService.saveSession(
+      AuthSessionModel(
+        userId: credential.userId,
+        name: credential.name,
+        loggedInAt: DateTime.now(),
+      ),
+    );
+
+    passwordCtrl.clear();
+    Get.offAllNamed(AppRoutes.dashboard);
   }
 
   bool get _isCurrentlyLockedOut =>

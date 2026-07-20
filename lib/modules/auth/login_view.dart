@@ -185,6 +185,19 @@ class LoginView extends GetView<LoginController> {
                     : const Text('Sign in'),
               ),
             ),
+            if (controller.isLoading.value) ...[
+              const SizedBox(height: 10),
+              Obx(
+                () => Center(
+                  child: Text(
+                    controller.syncStatus.value.isNotEmpty
+                        ? controller.syncStatus.value
+                        : 'Signing in…',
+                    style: AppTextStyles.caption,
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import '../core/services/offline_credential_service.dart';
 import '../core/services/session_service.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/app_text_styles.dart';
@@ -196,6 +197,12 @@ class _AppDrawerState extends State<AppDrawer> {
               tooltip: 'Logout',
               onPressed: () async {
                 await Get.find<SessionService>().clearSession();
+                // Clearing the offline credential is what actually
+                // enforces "logout requires internet to log back in" —
+                // without this, the salted password hash saved at last
+                // online login would still let this user straight back
+                // in offline.
+                await Get.find<OfflineCredentialService>().clear();
                 Get.offAllNamed(AppRoutes.login);
               },
               icon: Icon(Icons.logout_rounded,
