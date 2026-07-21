@@ -16,145 +16,158 @@ class PartyListView extends GetView<PartyController> {
 
   @override
   Widget build(BuildContext context) {
-    return AppScaffold(
-      routeName: AppRoutes.partyList,
-      title: 'Party',
-      body: Padding(
-        padding: EdgeInsets.symmetric(
-          horizontal: Responsive.horizontalPadding(context),
-          vertical: 16,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-           
-            SearchField(
-              hint: 'Search by party name',
-              onChanged: controller.setSearch,
-            ),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                // _actionIcon(
-                //   icon: Icons.cloud_upload_rounded,
-                //   color: AppColors.success,
-                //   tooltip: 'Export',
-                //   onTap: () => _showComingSoon(context, 'Export'),
-                // ),
-                // const SizedBox(width: 5),
-                // _actionIcon(
-                //   icon: Icons.print_rounded,
-                //   color: AppColors.skyBlue,
-                //   tooltip: 'Print',
-                //   onTap: () => _showComingSoon(context, 'Print'),
-                // ),
-                // const SizedBox(width: 5),
-                // _actionIcon(
-                //   icon: Icons.download_rounded,
-                //   color: AppColors.skyBlue,
-                //   tooltip: 'Download',
-                //   onTap: () => _showComingSoon(context, 'Download'),
-                // ),
-                // const SizedBox(width: 5),
-                Obx(
-                  () => ViewModeToggle(
-                    isTableView: controller.isTableView.value,
-                    onChanged: controller.toggleViewMode,
-                  ),
-                ),
-                const Spacer(),
-                ElevatedButton.icon(
-                  onPressed: () {
-                    controller.startCreate();
-                    Get.toNamed(AppRoutes.partyForm);
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.ember,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                  ),
-                  icon: const Icon(Icons.add_circle_rounded, size: 18),
-                  label: const Text('Add'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: Obx(() {
-                if (controller.isLoadingList.value &&
-                    controller.paginated.isEmpty) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                final list = controller.paginated;
-                if (list.isEmpty) {
-                  return const EmptyState(
-                    icon: Icons.groups_rounded,
-                    title: 'No parties found',
-                    subtitle: 'Try a different search or add a new party.',
-                  );
-                }
-                final startIndex =
-                    (controller.pageNo.value - 1) * controller.pageLimit.value;
-                if (controller.isTableView.value) {
-                  return SingleChildScrollView(
-                    child: AppDataTable(
-                      columns: const [
-                        'S.No',
-                        'Party Name',
-                        'State',
-                        'Action',
-                      ],
-                      rows: List.generate(list.length, (i) {
-                        final party = list[i];
-                        return [
-                          Text('${startIndex + i + 1}',
-                              style: AppTextStyles.body),
-                          
-                          SizedBox(
-                            width: 200,
-                            child: Text(party.name,
-                                style: AppTextStyles.bodyStrong,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis),
-                          ),
-                          Text(party.state, style: AppTextStyles.body),
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                tooltip: 'Edit',
-                                visualDensity: VisualDensity.compact,
-                                onPressed: () => controller.startEdit(party),
-                                icon: Icon(Icons.edit_rounded,
-                                    color: AppColors.teal, size: 18),
-                              ),
-                              
-                            ],
-                          ),
-                        ];
-                      }),
+    // GetX only disposes a `lazyPut` controller once every route bound to
+    // it has been fully popped off the Navigator stack — if the sidebar
+    // re-pushes `/party` while an earlier visit is still buried further
+    // down the stack, `controller` here is the *same* instance as last
+    // time, and `onInit()` (which only ever runs once per instance) can't
+    // be relied on to reset it. `_PartyListFreshVisit` sidesteps that
+    // entirely: it's a brand-new widget subtree on every navigation-in
+    // (Flutter always builds a fresh `State` for a freshly pushed route),
+    // so its `initState()` reliably fires exactly once per visit — see
+    // `PartyController.resetForFreshVisit`.
+    return _PartyListFreshVisit(
+      controller: controller,
+      child: AppScaffold(
+        routeName: AppRoutes.partyList,
+        title: 'Party',
+        body: Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: Responsive.horizontalPadding(context),
+            vertical: 16,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+             
+              SearchField(
+                hint: 'Search by party name',
+                onChanged: controller.setSearch,
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  // _actionIcon(
+                  //   icon: Icons.cloud_upload_rounded,
+                  //   color: AppColors.success,
+                  //   tooltip: 'Export',
+                  //   onTap: () => _showComingSoon(context, 'Export'),
+                  // ),
+                  // const SizedBox(width: 5),
+                  // _actionIcon(
+                  //   icon: Icons.print_rounded,
+                  //   color: AppColors.skyBlue,
+                  //   tooltip: 'Print',
+                  //   onTap: () => _showComingSoon(context, 'Print'),
+                  // ),
+                  // const SizedBox(width: 5),
+                  // _actionIcon(
+                  //   icon: Icons.download_rounded,
+                  //   color: AppColors.skyBlue,
+                  //   tooltip: 'Download',
+                  //   onTap: () => _showComingSoon(context, 'Download'),
+                  // ),
+                  // const SizedBox(width: 5),
+                  Obx(
+                    () => ViewModeToggle(
+                      isTableView: controller.isTableView.value,
+                      onChanged: controller.toggleViewMode,
                     ),
-                  );
-                }
-                return ListView.separated(
-                  padding: const EdgeInsets.only(bottom: 16),
-                  itemCount: list.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
-                  itemBuilder: (context, index) {
-                    final party = list[index];
-                    return _PartyTile(
-                      serial: startIndex + index + 1,
-                      party: party,
-                      onTap: () => controller.startEdit(party),
-                      onDelete: () => controller.deleteParty(party),
+                  ),
+                  const Spacer(),
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      controller.startCreate();
+                      Get.toNamed(AppRoutes.partyForm);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.ember,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                    ),
+                    icon: const Icon(Icons.add_circle_rounded, size: 18),
+                    label: const Text('Add'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: Obx(() {
+                  if (controller.isLoadingList.value &&
+                      controller.paginated.isEmpty) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  final list = controller.paginated;
+                  if (list.isEmpty) {
+                    return const EmptyState(
+                      icon: Icons.groups_rounded,
+                      title: 'No parties found',
+                      subtitle: 'Try a different search or add a new party.',
                     );
-                  },
-                );
-              }),
-            ),
-            const SizedBox(height: 8),
-            Obx(() => _paginationBar(context)),
-          ],
+                  }
+                  final startIndex =
+                      (controller.pageNo.value - 1) * controller.pageLimit.value;
+                  if (controller.isTableView.value) {
+                    return SingleChildScrollView(
+                      child: AppDataTable(
+                        columns: const [
+                          'S.No',
+                          'Party Name',
+                          'State',
+                          'Action',
+                        ],
+                        rows: List.generate(list.length, (i) {
+                          final party = list[i];
+                          return [
+                            Text('${startIndex + i + 1}',
+                                style: AppTextStyles.body),
+                            
+                            SizedBox(
+                              width: 200,
+                              child: Text(party.name,
+                                  style: AppTextStyles.bodyStrong,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis),
+                            ),
+                            Text(party.state, style: AppTextStyles.body),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  tooltip: 'Edit',
+                                  visualDensity: VisualDensity.compact,
+                                  onPressed: () => controller.startEdit(party),
+                                  icon: Icon(Icons.edit_rounded,
+                                      color: AppColors.teal, size: 18),
+                                ),
+                                
+                              ],
+                            ),
+                          ];
+                        }),
+                      ),
+                    );
+                  }
+                  return ListView.separated(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    itemCount: list.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (context, index) {
+                      final party = list[index];
+                      return _PartyTile(
+                        serial: startIndex + index + 1,
+                        party: party,
+                        onTap: () => controller.startEdit(party),
+                        onDelete: () => controller.deleteParty(party),
+                      );
+                    },
+                  );
+                }),
+              ),
+              const SizedBox(height: 8),
+              Obx(() => _paginationBar(context)),
+            ],
+          ),
         ),
       ),
     );
@@ -277,6 +290,46 @@ class PartyListView extends GetView<PartyController> {
       ),
     );
   }
+}
+
+/// Forces a reset to defaults (empty search, page limit 10, page 1, plus
+/// a reload) exactly once every time the Party list screen is freshly
+/// navigated to — see the comment in `PartyListView.build` for why this
+/// can't just live in `PartyController.onInit()` alone. Being a
+/// `StatefulWidget`, Flutter builds a brand-new `State` for it on every
+/// fresh route push regardless of whether GetX handed back a reused
+/// controller instance or a new one.
+class _PartyListFreshVisit extends StatefulWidget {
+  final PartyController controller;
+  final Widget child;
+  const _PartyListFreshVisit({
+    required this.controller,
+    required this.child,
+  });
+
+  @override
+  State<_PartyListFreshVisit> createState() => _PartyListFreshVisitState();
+}
+
+class _PartyListFreshVisitState extends State<_PartyListFreshVisit> {
+  @override
+  void initState() {
+    super.initState();
+    // resetForFreshVisit() mutates Rx values (searchQuery, pageNo,
+    // pageLimit, isLoadingList...), which makes every Obx watching them
+    // ask to rebuild. Calling that synchronously here — inside
+    // initState(), which itself runs as part of mounting this very
+    // widget tree — asks Flutter to rebuild a widget while its own
+    // ancestors (PartyListView) are still mid-build, which throws
+    // "setState() or markNeedsBuild() called during build". Deferring
+    // to right after this frame finishes avoids that entirely.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.controller.resetForFreshVisit();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 class _PartyTile extends StatelessWidget {

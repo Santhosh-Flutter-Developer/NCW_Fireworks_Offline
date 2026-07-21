@@ -83,6 +83,26 @@ class PartyController extends GetxController {
   @override
   void onInit() {
     super.onInit();
+    resetForFreshVisit();
+  }
+
+  /// Called every time the Party list screen is freshly entered via
+  /// navigation (see `_PartyListFreshVisit` in `party_list_view.dart`).
+  /// GetX only disposes a `lazyPut` controller once every route bound to
+  /// it has been fully popped — if the sidebar pushes `/party` again
+  /// while an earlier visit is still further down the Navigator stack,
+  /// the *same* controller instance gets reused and `onInit()` never
+  /// runs a second time. This puts it back to a clean slate regardless —
+  /// search text cleared, page limit back to 10, first page, list view
+  /// (not table view) — then reloads. Works the same online or offline
+  /// since [loadParties] already falls back to the local cache when
+  /// there's no connection.
+  void resetForFreshVisit() {
+    _searchDebounce?.cancel();
+    searchQuery.value = '';
+    pageLimit.value = 10;
+    pageNo.value = 1;
+    isTableView.value = false;
     loadParties();
   }
 
