@@ -4,7 +4,6 @@ import '../../core/constants/api_endpoints.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_exception.dart';
 import '../../core/services/cache_keys.dart';
-import '../../core/services/connectivity_service.dart';
 import '../../core/services/local_cache_service.dart';
 import '../../core/utils/offline_filter_utils.dart';
 import '../models/party/party_detail_response_model.dart';
@@ -17,14 +16,11 @@ import '../models/party/party_save_response_model.dart';
 class PartyRepository {
   PartyRepository({
     ApiClient? apiClient,
-    ConnectivityService? connectivityService,
     LocalCacheService? cacheService,
   })  : _apiClient = apiClient ?? ApiClient(),
-        _connectivity = connectivityService ?? Get.find<ConnectivityService>(),
         _cache = cacheService ?? Get.find<LocalCacheService>();
 
   final ApiClient _apiClient;
-  final ConnectivityService _connectivity;
   final LocalCacheService _cache;
 
   /// Creates a new party, or updates an existing one when [editId] is
@@ -87,58 +83,60 @@ class PartyRepository {
     throw ApiRequestException(result.message);
   }
 
-  /// Fetches a page of the party list. [agentId] is always sent as an
-  /// empty string for now — there's no agent filter in the UI — and
-  /// [searchText] matches by party name. [pageNumber]/[pageLimit] are
-  /// optional: leave them null (as [DataSyncService] does) to fetch the
-  /// unpaginated full list, with no `page_number`/`page_limit` sent at
-  /// all.
+  /// Returns a page of the party list — always from the offline cache
+  /// that [DataSyncService]/the Sync button populate, regardless of
+  /// whether the device currently has internet.
+  ///
+  /// The only thing that ever calls the live `party_listing` endpoint is
+  /// a manual tap of the Sync button (`DataSyncService.syncParty`), which
+  /// fetches the full, unpaginated list. Browsing the list itself never
+  /// hits the network — this keeps behavior identical online and offline
+  /// and means a flaky connection can never cause a half-loaded list or
+  /// an unexpectedly slow screen while just looking at data.
+  ///
+  /// [agentId] is accepted for API-shape compatibility but currently
+  /// unused — there's no agent filter in the UI, and the cached rows
+  /// don't carry an agent id to filter by anyway.
   Future<PartyListResponseModel> listParties({
     String agentId = '',
     String searchText = '',
     int? pageNumber,
     int? pageLimit,
   }) async {
-    if (!_connectivity.isOnline.value) {
-      return _partiesFromCache(
-        searchText: searchText,
-        pageNumber: pageNumber,
-        pageLimit: pageLimit,
-      );
-    }
+    return _partiesFromCache(
+      searchText: searchText,
+      pageNumber: pageNumber,
+      pageLimit: pageLimit,
+    );
+  }
 
-    try {
-      final json = await _apiClient.postJson(
-        ApiEndpoints.party,
-        body: {
-          'party_listing': '1',
-          'filter_agent_id': agentId,
-          'search_text': searchText,
-          if (pageNumber != null) 'page_number': pageNumber.toString(),
-          if (pageLimit != null) 'page_limit': pageLimit.toString(),
-        },
-      );
+  /// Calls the live `party_listing` endpoint directly, no cache fallback.
+  /// This is the *only* method in the app that ever does — used
+  /// exclusively by [DataSyncService] (both the post-login full sync and
+  /// the per-page Sync button), to refresh the offline cache that
+  /// [listParties] reads from. Throws on failure exactly like any other
+  /// API call here; [DataSyncService] is what catches and reports it.
+  Future<PartyListResponseModel> fetchLiveParties({
+    String agentId = '',
+    String searchText = '',
+    int? pageNumber,
+    int? pageLimit,
+  }) async {
+    final json = await _apiClient.postJson(
+      ApiEndpoints.party,
+      body: {
+        'party_listing': '1',
+        'filter_agent_id': agentId,
+        'search_text': searchText,
+        if (pageNumber != null) 'page_number': pageNumber.toString(),
+        if (pageLimit != null) 'page_limit': pageLimit.toString(),
+      },
+    );
 
-      final result = PartyListResponseModel.fromJson(json);
+    final result = PartyListResponseModel.fromJson(json);
+    if (result.isSuccess) return result;
 
-      if (result.isSuccess) {
-        return result;
-      }
-
-      throw ApiRequestException(result.message);
-    } on NetworkException {
-      return _partiesFromCache(
-        searchText: searchText,
-        pageNumber: pageNumber,
-        pageLimit: pageLimit,
-      );
-    } on TimeoutApiException {
-      return _partiesFromCache(
-        searchText: searchText,
-        pageNumber: pageNumber,
-        pageLimit: pageLimit,
-      );
-    }
+    throw ApiRequestException(result.message);
   }
 
   /// Builds a page of results from whatever [DataSyncService] last cached,

@@ -11,13 +11,27 @@ import 'cache_keys.dart';
 import 'local_cache_service.dart';
 
 /// Pulls the Party / Price Upload / Quotation / Estimation / Receipt
-/// lists down from the API and caches them locally, so the rest of the
-/// app has something to work from once the connection drops.
+/// lists down from the API and caches them locally.
 ///
-/// Run once, right after a *successful online* login (see
-/// `LoginController`). Every list endpoint here is server-paginated, but
-/// sync deliberately never sends `page_number`/`page_limit` at all — the
-/// repositories treat both as optional and, when omitted, the endpoint
+/// This is now the *only* place in the app that ever calls those five
+/// list endpoints live. Every list screen's own repository method
+/// (`listParties`, `fetchPriceList`, `listQuotations`, `listEstimates`,
+/// `listReceipts`) always reads from the offline cache this service
+/// populates — online or offline, it makes no difference. Each
+/// repository also exposes a `fetchLiveXxx` twin (`fetchLiveParties`,
+/// `fetchLivePriceList`, etc.) that actually hits the network; those are
+/// used exclusively here, never by a list screen directly.
+///
+/// Runs in two ways:
+/// - [syncAll] — every section, in order — once, right after a
+///   *successful online* login (see `LoginController`).
+/// - The per-page Sync button — one section at a time (`syncParty`,
+///   `syncPriceList`, `syncQuotations`, `syncEstimations`,
+///   `syncReceipts`), whenever the person taps it while online.
+///
+/// Every list endpoint here is server-paginated, but sync deliberately
+/// never sends `page_number`/`page_limit` at all — the `fetchLiveXxx`
+/// methods treat both as optional and, when omitted, the endpoint
 /// returns its full list in one shot. This is exactly the "full list,
 /// no pagination" mode the backend is moving towards for sync callers;
 /// once every endpoint is confirmed to support it, nothing else here
@@ -146,7 +160,7 @@ class DataSyncService extends GetxService {
 
   Future<void> _syncParties() async {
     _announce('Syncing parties');
-    final result = await _partyRepository.listParties();
+    final result = await _partyRepository.fetchLiveParties();
     final items = result.items
         .map((p) => {
               'party_id': p.partyId,
@@ -161,7 +175,7 @@ class DataSyncService extends GetxService {
     _announce('Syncing price list');
     final pricelists = <String, Map<String, dynamic>>{};
     final products = <String, Map<String, dynamic>>{};
-    final result = await _productPriceRepository.fetchPriceList();
+    final result = await _productPriceRepository.fetchLivePriceList();
     final rows = result.rows
         .map((r) => {
               'sno': r.sno,
@@ -194,7 +208,7 @@ class DataSyncService extends GetxService {
       required String cancelled,
     }) async {
       _announce('Syncing quotations — $tabLabel');
-      final result = await _quotationRepository.listQuotations(
+      final result = await _quotationRepository.fetchLiveQuotations(
         drafted: drafted,
         cancelled: cancelled,
       );
@@ -237,7 +251,7 @@ class DataSyncService extends GetxService {
       required String cancelled,
     }) async {
       _announce('Syncing estimations — $tabLabel');
-      final result = await _estimateRepository.listEstimates(
+      final result = await _estimateRepository.fetchLiveEstimates(
         drafted: drafted,
         cancelled: cancelled,
       );
@@ -284,7 +298,7 @@ class DataSyncService extends GetxService {
       required String cancelled,
     }) async {
       _announce('Syncing receipts — $tabLabel');
-      final result = await _receiptRepository.listReceipts(
+      final result = await _receiptRepository.fetchLiveReceipts(
         cancelled: cancelled,
       );
       final items = result.items

@@ -4,7 +4,6 @@ import '../../core/constants/api_endpoints.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_exception.dart';
 import '../../core/services/cache_keys.dart';
-import '../../core/services/connectivity_service.dart';
 import '../../core/services/local_cache_service.dart';
 import '../../core/utils/offline_filter_utils.dart';
 import '../models/estimate/estimate_charge_type_response_model.dart';
@@ -56,14 +55,11 @@ class EstimateChargeLine {
 class EstimateRepository {
   EstimateRepository({
     ApiClient? apiClient,
-    ConnectivityService? connectivityService,
     LocalCacheService? cacheService,
   })  : _apiClient = apiClient ?? ApiClient(),
-        _connectivity = connectivityService ?? Get.find<ConnectivityService>(),
         _cache = cacheService ?? Get.find<LocalCacheService>();
 
   final ApiClient _apiClient;
-  final ConnectivityService _connectivity;
   final LocalCacheService _cache;
 
   /// Bootstraps the Add/Edit Estimate form: dropdown data (pricelist,
@@ -93,16 +89,21 @@ class EstimateRepository {
     throw ApiRequestException(result.message);
   }
 
-  /// Fetches a page of the estimate list, with the same From/To/search/
-  /// agent/party filters as the web app's Estimate list screen.
+  /// Returns a page of the estimate list — always from the offline
+  /// cache that [DataSyncService]/the Sync button populate, regardless of
+  /// whether the device currently has internet.
   ///
-  /// [drafted] and [cancelled] select which tab's rows come back — the
-  /// server's WHERE clause is `drafted = '<drafted>' AND cancelled =
-  /// '<cancelled>'`, so pass `'1'`/`'0'` explicitly for Active / Draft /
-  /// Cancel rather than leaving them blank.
-  /// [pageNumber]/[pageLimit] are optional: leave them null (as
-  /// [DataSyncService] does) to fetch the unpaginated full list, with no
-  /// `page_number`/`page_limit` sent at all.
+  /// [drafted] and [cancelled] select which tab's rows come back — pass
+  /// `'1'`/`'0'` explicitly for Active / Draft / Cancel rather than
+  /// leaving them blank, same as the cache is stored per-tab.
+  ///
+  /// The only thing that ever calls the live `estimate_listing` endpoint
+  /// is a manual tap of the Sync button (`DataSyncService.syncEstimations`),
+  /// which fetches the full, unpaginated list for all three tabs.
+  /// Browsing the list itself never hits the network — this keeps
+  /// behavior identical online and offline and means a flaky connection
+  /// can never cause a half-loaded list or an unexpectedly slow screen
+  /// while just looking at data.
   Future<EstimateListResponseModel> listEstimates({
     String filterFromDate = '',
     String filterToDate = '',
@@ -114,97 +115,62 @@ class EstimateRepository {
     String drafted = '0',
     String cancelled = '0',
   }) async {
-    if (!_connectivity.isOnline.value) {
-      return _estimatesFromCache(
-        drafted: drafted,
-        cancelled: cancelled,
-        filterFromDate: filterFromDate,
-        filterToDate: filterToDate,
-        searchText: searchText,
-        filterAgentId: filterAgentId,
-        filterPartyId: filterPartyId,
-        pageNumber: pageNumber,
-        pageLimit: pageLimit,
-      );
-    }
+    return _estimatesFromCache(
+      drafted: drafted,
+      cancelled: cancelled,
+      filterFromDate: filterFromDate,
+      filterToDate: filterToDate,
+      searchText: searchText,
+      filterAgentId: filterAgentId,
+      filterPartyId: filterPartyId,
+      pageNumber: pageNumber,
+      pageLimit: pageLimit,
+    );
+  }
 
-    try {
-      final json = await _apiClient.postJson(
-        ApiEndpoints.estimate,
-        body: {
-          'estimate_listing': '1',
-          'filter_from_date': filterFromDate,
-          'filter_to_date': filterToDate,
-          'search_text': searchText,
-          'filter_agent_id': filterAgentId,
-          'filter_party_id': filterPartyId,
-          if (pageNumber != null) 'page_number': pageNumber.toString(),
-          if (pageLimit != null) 'page_limit': pageLimit.toString(),
-          'drafted': drafted,
-          'cancelled': cancelled,
-        },
-      );
+  /// Calls the live `estimate_listing` endpoint directly, no cache
+  /// fallback. This is the *only* method in the app that ever does — used
+  /// exclusively by [DataSyncService] (both the post-login full sync and
+  /// the per-page Sync button), to refresh the offline cache that
+  /// [listEstimates] reads from. Throws on failure exactly like any other
+  /// API call here; [DataSyncService] is what catches and reports it.
+  Future<EstimateListResponseModel> fetchLiveEstimates({
+    String filterFromDate = '',
+    String filterToDate = '',
+    String searchText = '',
+    String filterAgentId = '',
+    String filterPartyId = '',
+    int? pageNumber,
+    int? pageLimit,
+    String drafted = '0',
+    String cancelled = '0',
+  }) async {
+    final json = await _apiClient.postJson(
+      ApiEndpoints.estimate,
+      body: {
+        'estimate_listing': '1',
+        'filter_from_date': filterFromDate,
+        'filter_to_date': filterToDate,
+        'search_text': searchText,
+        'filter_agent_id': filterAgentId,
+        'filter_party_id': filterPartyId,
+        if (pageNumber != null) 'page_number': pageNumber.toString(),
+        if (pageLimit != null) 'page_limit': pageLimit.toString(),
+        'drafted': drafted,
+        'cancelled': cancelled,
+      },
+    );
 
-      final result = EstimateListResponseModel.fromJson(json);
-      if (result.isSuccess) {
-        // The server's own page response never carries a total row count,
-        // but the last full sync did pull down every row for this tab —
-        // so the *known* total is however many of those cached rows still
-        // match the filters being applied right now. This keeps
-        // "page / totalPages" stable while paging instead of growing by
-        // one every time Next is tapped. Falls back to null (→ the old
-        // "was this page full" heuristic) if nothing has been synced yet.
-        return EstimateListResponseModel(
-          code: result.code,
-          message: result.message,
-          items: result.items,
-          agentList: result.agentList,
-          partyList: result.partyList,
-          totalRecords: _cachedTotalCount(
-            drafted: drafted,
-            cancelled: cancelled,
-            filterFromDate: filterFromDate,
-            filterToDate: filterToDate,
-            searchText: searchText,
-            filterAgentId: filterAgentId,
-            filterPartyId: filterPartyId,
-          ),
-        );
-      }
+    final result = EstimateListResponseModel.fromJson(json);
+    if (result.isSuccess) return result;
 
-      throw ApiRequestException(result.message);
-    } on NetworkException {
-      return _estimatesFromCache(
-        drafted: drafted,
-        cancelled: cancelled,
-        filterFromDate: filterFromDate,
-        filterToDate: filterToDate,
-        searchText: searchText,
-        filterAgentId: filterAgentId,
-        filterPartyId: filterPartyId,
-        pageNumber: pageNumber,
-        pageLimit: pageLimit,
-      );
-    } on TimeoutApiException {
-      return _estimatesFromCache(
-        drafted: drafted,
-        cancelled: cancelled,
-        filterFromDate: filterFromDate,
-        filterToDate: filterToDate,
-        searchText: searchText,
-        filterAgentId: filterAgentId,
-        filterPartyId: filterPartyId,
-        pageNumber: pageNumber,
-        pageLimit: pageLimit,
-      );
-    }
+    throw ApiRequestException(result.message);
   }
 
   /// [drafted]/[cancelled] pick which cached tab snapshot to read from —
   /// [DataSyncService] stores Active/Draft/Cancel separately, the same
   /// split the server's `drafted`/`cancelled` flags produce. Returns
-  /// every cached row matching the given filters, unpaginated — shared by
-  /// the offline list path and by [_cachedTotalCount].
+  /// every cached row matching the given filters, unpaginated.
   List<EstimateListItem> _filterCachedEstimates({
     required String drafted,
     required String cancelled,
@@ -273,38 +239,6 @@ class EstimateRepository {
         e.partyNameMobileCity,
       ]);
     }).toList();
-  }
-
-  /// How many *cached* rows currently match the given filters — used to
-  /// give the online path a stable total count even though the live
-  /// server response doesn't include one. Returns null when nothing has
-  /// been synced for this tab yet (an empty cache means "unknown", not
-  /// "zero rows").
-  int? _cachedTotalCount({
-    required String drafted,
-    required String cancelled,
-    required String filterFromDate,
-    required String filterToDate,
-    required String searchText,
-    required String filterAgentId,
-    required String filterPartyId,
-  }) {
-    final cacheKey = cancelled == '1'
-        ? CacheKeys.estimationCancel
-        : (drafted == '1'
-            ? CacheKeys.estimationDraft
-            : CacheKeys.estimationActive);
-    if (_cache.getJsonList(cacheKey).isEmpty) return null;
-
-    return _filterCachedEstimates(
-      drafted: drafted,
-      cancelled: cancelled,
-      filterFromDate: filterFromDate,
-      filterToDate: filterToDate,
-      searchText: searchText,
-      filterAgentId: filterAgentId,
-      filterPartyId: filterPartyId,
-    ).length;
   }
 
   EstimateListResponseModel _estimatesFromCache({

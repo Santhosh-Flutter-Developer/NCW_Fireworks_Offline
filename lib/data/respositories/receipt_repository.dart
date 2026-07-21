@@ -4,7 +4,6 @@ import '../../core/constants/api_endpoints.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_exception.dart';
 import '../../core/services/cache_keys.dart';
-import '../../core/services/connectivity_service.dart';
 import '../../core/services/local_cache_service.dart';
 import '../../core/utils/offline_filter_utils.dart';
 import '../models/receipt/id_name.dart';
@@ -39,14 +38,11 @@ class ReceiptPaymentEntry {
 class ReceiptRepository {
   ReceiptRepository({
     ApiClient? apiClient,
-    ConnectivityService? connectivityService,
     LocalCacheService? cacheService,
   })  : _apiClient = apiClient ?? ApiClient(),
-        _connectivity = connectivityService ?? Get.find<ConnectivityService>(),
         _cache = cacheService ?? Get.find<LocalCacheService>();
 
   final ApiClient _apiClient;
-  final ConnectivityService _connectivity;
   final LocalCacheService _cache;
 
   /// Bootstraps the Add Receipt form: today's default receipt date plus
@@ -113,11 +109,21 @@ class ReceiptRepository {
     throw ApiRequestException(result.message);
   }
 
-  /// Paginated, filtered Receipt list — mirrors the columns/filters on
-  /// the web app's Receipt screen (from/to date, receipt number search,
-  /// party, Active/Cancel). [pageNumber]/[pageLimit] are optional: leave
-  /// them null (as [DataSyncService] does) to fetch the unpaginated full
-  /// list, with no `page_number`/`page_limit` sent at all.
+  /// Returns a page of the Receipt list — always from the offline cache
+  /// that [DataSyncService]/the Sync button populate, regardless of
+  /// whether the device currently has internet.
+  ///
+  /// [cancelled] selects which tab's rows come back (Receipts have no
+  /// Draft tab, just Active/Cancel) — pass `'1'`/`'0'` explicitly, same
+  /// as the cache is stored per-tab.
+  ///
+  /// The only thing that ever calls the live `receipt_listing` endpoint
+  /// is a manual tap of the Sync button (`DataSyncService.syncReceipts`),
+  /// which fetches the full, unpaginated list for both tabs. Browsing the
+  /// list itself never hits the network — this keeps behavior identical
+  /// online and offline and means a flaky connection can never cause a
+  /// half-loaded list or an unexpectedly slow screen while just looking
+  /// at data.
   Future<ReceiptListResponseModel> listReceipts({
     String filterFromDate = '',
     String filterToDate = '',
@@ -127,86 +133,56 @@ class ReceiptRepository {
     int? pageNumber,
     int? pageLimit,
   }) async {
-    if (!_connectivity.isOnline.value) {
-      return _receiptsFromCache(
-        cancelled: cancelled,
-        filterFromDate: filterFromDate,
-        filterToDate: filterToDate,
-        searchText: searchText,
-        filterPartyId: filterPartyId,
-        pageNumber: pageNumber,
-        pageLimit: pageLimit,
-      );
-    }
+    return _receiptsFromCache(
+      cancelled: cancelled,
+      filterFromDate: filterFromDate,
+      filterToDate: filterToDate,
+      searchText: searchText,
+      filterPartyId: filterPartyId,
+      pageNumber: pageNumber,
+      pageLimit: pageLimit,
+    );
+  }
 
-    try {
-      final json = await _apiClient.postJson(
-        ApiEndpoints.receipt,
-        body: {
-          'receipt_listing': '1',
-          'filter_from_date': filterFromDate,
-          'filter_to_date': filterToDate,
-          'search_text': searchText,
-          'filter_party_id': filterPartyId,
-          'cancelled': cancelled,
-          if (pageNumber != null) 'page_number': pageNumber.toString(),
-          if (pageLimit != null) 'page_limit': pageLimit.toString(),
-        },
-      );
+  /// Calls the live `receipt_listing` endpoint directly, no cache
+  /// fallback. This is the *only* method in the app that ever does — used
+  /// exclusively by [DataSyncService] (both the post-login full sync and
+  /// the per-page Sync button), to refresh the offline cache that
+  /// [listReceipts] reads from. Throws on failure exactly like any other
+  /// API call here; [DataSyncService] is what catches and reports it.
+  Future<ReceiptListResponseModel> fetchLiveReceipts({
+    String filterFromDate = '',
+    String filterToDate = '',
+    String searchText = '',
+    String filterPartyId = '',
+    String cancelled = '0',
+    int? pageNumber,
+    int? pageLimit,
+  }) async {
+    final json = await _apiClient.postJson(
+      ApiEndpoints.receipt,
+      body: {
+        'receipt_listing': '1',
+        'filter_from_date': filterFromDate,
+        'filter_to_date': filterToDate,
+        'search_text': searchText,
+        'filter_party_id': filterPartyId,
+        'cancelled': cancelled,
+        if (pageNumber != null) 'page_number': pageNumber.toString(),
+        if (pageLimit != null) 'page_limit': pageLimit.toString(),
+      },
+    );
 
-      final result = ReceiptListResponseModel.fromJson(json);
-      if (result.isSuccess) {
-        // The server's own page response never carries a total row count,
-        // but the last full sync did pull down every row for this tab —
-        // so the *known* total is however many of those cached rows still
-        // match the filters being applied right now. This keeps
-        // "page / totalPages" stable while paging instead of growing by
-        // one every time Next is tapped. Falls back to null (→ the old
-        // "was this page full" heuristic) if nothing has been synced yet.
-        return ReceiptListResponseModel(
-          code: result.code,
-          message: result.message,
-          items: result.items,
-          partyList: result.partyList,
-          totalRecords: _cachedTotalCount(
-            cancelled: cancelled,
-            filterFromDate: filterFromDate,
-            filterToDate: filterToDate,
-            searchText: searchText,
-            filterPartyId: filterPartyId,
-          ),
-        );
-      }
+    final result = ReceiptListResponseModel.fromJson(json);
+    if (result.isSuccess) return result;
 
-      throw ApiRequestException(result.message);
-    } on NetworkException {
-      return _receiptsFromCache(
-        cancelled: cancelled,
-        filterFromDate: filterFromDate,
-        filterToDate: filterToDate,
-        searchText: searchText,
-        filterPartyId: filterPartyId,
-        pageNumber: pageNumber,
-        pageLimit: pageLimit,
-      );
-    } on TimeoutApiException {
-      return _receiptsFromCache(
-        cancelled: cancelled,
-        filterFromDate: filterFromDate,
-        filterToDate: filterToDate,
-        searchText: searchText,
-        filterPartyId: filterPartyId,
-        pageNumber: pageNumber,
-        pageLimit: pageLimit,
-      );
-    }
+    throw ApiRequestException(result.message);
   }
 
   /// [cancelled] picks which cached tab snapshot to read from —
   /// [DataSyncService] stores Active/Cancel separately (Receipts have no
   /// Draft tab), the same split the server's `cancelled` flag produces.
-  /// Returns every cached row matching the given filters, unpaginated —
-  /// shared by the offline list path and by [_cachedTotalCount].
+  /// Returns every cached row matching the given filters, unpaginated.
   List<ReceiptListItem> _filterCachedReceipts({
     required String cancelled,
     required String filterFromDate,
@@ -254,31 +230,6 @@ class ReceiptRepository {
         r.agentName,
       ]);
     }).toList();
-  }
-
-  /// How many *cached* rows currently match the given filters — used to
-  /// give the online path a stable total count even though the live
-  /// server response doesn't include one. Returns null when nothing has
-  /// been synced for this tab yet (an empty cache means "unknown", not
-  /// "zero rows").
-  int? _cachedTotalCount({
-    required String cancelled,
-    required String filterFromDate,
-    required String filterToDate,
-    required String searchText,
-    required String filterPartyId,
-  }) {
-    final cacheKey =
-        cancelled == '1' ? CacheKeys.receiptCancel : CacheKeys.receiptActive;
-    if (_cache.getJsonList(cacheKey).isEmpty) return null;
-
-    return _filterCachedReceipts(
-      cancelled: cancelled,
-      filterFromDate: filterFromDate,
-      filterToDate: filterToDate,
-      searchText: searchText,
-      filterPartyId: filterPartyId,
-    ).length;
   }
 
   ReceiptListResponseModel _receiptsFromCache({
