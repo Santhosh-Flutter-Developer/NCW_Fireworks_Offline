@@ -114,6 +114,31 @@ class ReceiptController extends GetxController {
   @override
   void onInit() {
     super.onInit();
+    resetForFreshVisit();
+  }
+
+  /// Called every time the Receipt list screen is freshly entered via
+  /// navigation (see `_ReceiptListFreshVisit` in `receipt_list_view.dart`).
+  /// GetX only disposes a `lazyPut` controller once every route bound to
+  /// it has been fully popped — if the sidebar pushes `/receipt` again
+  /// while an earlier visit is still further down the Navigator stack,
+  /// the *same* controller instance gets reused and `onInit()` never runs
+  /// a second time. This puts it back to a clean slate regardless — search
+  /// text cleared, page size back to 10, first page, Active tab, both
+  /// date filters cleared, "All Partys" selected, list view (not table
+  /// view) — then reloads. Works the same online or offline since
+  /// [loadReceipts] already falls back to the local cache when there's no
+  /// connection.
+  void resetForFreshVisit() {
+    _searchDebounce?.cancel();
+    searchQuery.value = '';
+    pageSize.value = 10;
+    currentPage.value = 1;
+    activeTab.value = ReceiptTab.active;
+    filterFrom.value = null;
+    filterTo.value = null;
+    filterParty.value = null;
+    isTableView.value = false;
     loadReceipts();
   }
 
