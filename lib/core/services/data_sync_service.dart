@@ -55,6 +55,12 @@ class DataSyncService extends GetxService {
   final statusMessage = ''.obs;
   final RxnString lastError = RxnString();
 
+  /// Runs the full sync — every section, in order. Intended to run exactly
+  /// once, right after a successful online login (see `LoginController`).
+  /// Per-module sync buttons on each list screen should call their own
+  /// `syncXxx()` method below instead of this, so tapping "Sync" on, say,
+  /// the Quotation page doesn't also re-pull Party/Price List/Estimation/
+  /// Receipt in the background.
   Future<void> syncAll() async {
     if (isSyncing.value) return;
     isSyncing.value = true;
@@ -69,6 +75,47 @@ class DataSyncService extends GetxService {
         CacheKeys.lastSyncedAt,
         DateTime.now().toIso8601String(),
       );
+    } finally {
+      isSyncing.value = false;
+      statusMessage.value = '';
+    }
+  }
+
+  /// Re-syncs only the Party list's offline cache — used by the Sync
+  /// button on the Party screen.
+  Future<void> syncParty() =>
+      _syncOne('Syncing parties…', _syncParties);
+
+  /// Re-syncs only the Price List's offline cache — used by the Sync
+  /// button on the Price Upload screen.
+  Future<void> syncPriceList() =>
+      _syncOne('Syncing price list…', _syncPriceList);
+
+  /// Re-syncs only the Quotation list's offline cache (all three tabs) —
+  /// used by the Sync button on the Quotation screen.
+  Future<void> syncQuotations() =>
+      _syncOne('Syncing quotations…', _syncQuotations);
+
+  /// Re-syncs only the Estimation list's offline cache (all three tabs) —
+  /// used by the Sync button on the Estimate screen.
+  Future<void> syncEstimations() =>
+      _syncOne('Syncing estimations…', _syncEstimations);
+
+  /// Re-syncs only the Receipt list's offline cache (both tabs) — used by
+  /// the Sync button on the Receipt screen.
+  Future<void> syncReceipts() =>
+      _syncOne('Syncing receipts…', _syncReceipts);
+
+  /// Shared guard/cleanup around a single-module sync — mirrors
+  /// [syncAll]'s isSyncing/lastError/statusMessage handling, but for just
+  /// one section instead of all five. Doesn't touch [CacheKeys.lastSyncedAt]
+  /// since that's meant to reflect a *full* sync, not a partial one.
+  Future<void> _syncOne(String label, Future<void> Function() step) async {
+    if (isSyncing.value) return;
+    isSyncing.value = true;
+    lastError.value = null;
+    try {
+      await _runStep(label, step);
     } finally {
       isSyncing.value = false;
       statusMessage.value = '';

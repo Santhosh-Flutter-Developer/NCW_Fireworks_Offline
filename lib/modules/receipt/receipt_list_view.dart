@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 import 'package:ncw_fireworks/data/models/billing_item_model.dart';
+import '../../core/services/data_sync_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/utils/responsive.dart';
@@ -12,6 +13,7 @@ import '../../widgets/app_data_table.dart';
 import '../../widgets/app_scaffold.dart';
 import '../../widgets/common_widgets.dart';
 import '../../widgets/searchable_picker_sheet.dart';
+import '../../widgets/sync_action_button.dart';
 import '../../widgets/view_mode_toggle.dart';
 import 'receipt_controller.dart';
 
@@ -49,6 +51,12 @@ class _ReceiptListBody extends StatelessWidget {
     return AppScaffold(
       routeName: AppRoutes.receiptList,
       title: 'Receipt',
+      actions: [
+        SyncActionButton(
+          onSync: Get.find<DataSyncService>().syncReceipts,
+          onSynced: controller.loadReceipts,
+        ),
+      ],
       // floatingActionButton: FloatingActionButton.extended(
       //   onPressed: () {
       //     controller.startCreate();

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
+import '../../core/services/data_sync_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/utils/responsive.dart';
@@ -12,6 +13,7 @@ import '../../widgets/app_data_table.dart';
 import '../../widgets/app_scaffold.dart';
 import '../../widgets/common_widgets.dart';
 import '../../widgets/searchable_picker_sheet.dart';
+import '../../widgets/sync_action_button.dart';
 import '../../widgets/view_mode_toggle.dart';
 import 'estimate_product_picker_view.dart';
 import 'estimation_controller.dart';
@@ -50,6 +52,12 @@ class _EstimationListBody extends StatelessWidget {
     return AppScaffold(
       routeName: AppRoutes.estimationList,
       title: 'Estimate',
+      actions: [
+        SyncActionButton(
+          onSync: Get.find<DataSyncService>().syncEstimations,
+          onSynced: controller.loadEstimates,
+        ),
+      ],
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
           controller.startCreate();

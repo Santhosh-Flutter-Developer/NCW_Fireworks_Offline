@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import '../../core/services/data_sync_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/utils/responsive.dart';
@@ -8,6 +9,7 @@ import '../../routes/app_routes.dart';
 import '../../widgets/app_data_table.dart';
 import '../../widgets/app_scaffold.dart';
 import '../../widgets/common_widgets.dart';
+import '../../widgets/sync_action_button.dart';
 import '../../widgets/view_mode_toggle.dart';
 import 'party_controller.dart';
 
@@ -31,6 +33,12 @@ class PartyListView extends GetView<PartyController> {
       child: AppScaffold(
         routeName: AppRoutes.partyList,
         title: 'Party',
+        actions: [
+          SyncActionButton(
+            onSync: Get.find<DataSyncService>().syncParty,
+            onSynced: controller.loadParties,
+          ),
+        ],
         body: Padding(
           padding: EdgeInsets.symmetric(
             horizontal: Responsive.horizontalPadding(context),
