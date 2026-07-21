@@ -140,6 +140,32 @@ class EstimationController extends GetxController {
   @override
   void onInit() {
     super.onInit();
+    resetForFreshVisit();
+  }
+
+  /// Called every time the Estimate list screen is freshly entered via
+  /// navigation (see `_EstimationListFreshVisit` in
+  /// `estimation_list_view.dart`). GetX only disposes a `lazyPut`
+  /// controller once every route bound to it has been fully popped — if
+  /// the sidebar pushes `/estimation` again while an earlier visit is
+  /// still further down the Navigator stack, the *same* controller
+  /// instance gets reused and `onInit()` never runs a second time. This
+  /// puts it back to a clean slate regardless — search text cleared, page
+  /// size back to 10, first page, Active tab, both date filters cleared,
+  /// "All Agents"/"All Partys" selected, list view (not table view) —
+  /// then reloads. Works the same online or offline since [loadEstimates]
+  /// already falls back to the local cache when there's no connection.
+  void resetForFreshVisit() {
+    _searchDebounce?.cancel();
+    searchQuery.value = '';
+    pageSize.value = 10;
+    currentPage.value = 1;
+    activeTab.value = EstimationTab.active;
+    filterFrom.value = null;
+    filterTo.value = null;
+    filterAgent.value = null;
+    filterParty.value = null;
+    isTableView.value = false;
     loadEstimates();
   }
 

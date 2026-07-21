@@ -23,6 +23,30 @@ class EstimationListView extends GetView<EstimationController> {
 
   @override
   Widget build(BuildContext context) {
+    // GetX only disposes a `lazyPut` controller once every route bound to
+    // it has been fully popped off the Navigator stack — if the sidebar
+    // re-pushes `/estimation` while an earlier visit is still buried
+    // further down the stack, `controller` here is the *same* instance as
+    // last time, and `onInit()` (which only ever runs once per instance)
+    // can't be relied on to reset it. `_EstimationListFreshVisit` sidesteps
+    // that entirely: it's a brand-new widget subtree on every
+    // navigation-in (Flutter always builds a fresh `State` for a freshly
+    // pushed route), so its `initState()` reliably fires exactly once per
+    // visit — see `EstimationController.resetForFreshVisit`.
+    return _EstimationListFreshVisit(
+      controller: controller,
+      child: _EstimationListBody(controller: controller, df: _df),
+    );
+  }
+}
+
+class _EstimationListBody extends StatelessWidget {
+  final EstimationController controller;
+  final DateFormat df;
+  const _EstimationListBody({required this.controller, required this.df});
+
+  @override
+  Widget build(BuildContext context) {
     return AppScaffold(
       routeName: AppRoutes.estimationList,
       title: 'Estimate',
@@ -47,7 +71,7 @@ class EstimationListView extends GetView<EstimationController> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _FilterBar(controller: controller, df: _df),
+            _FilterBar(controller: controller, df: df),
             const SizedBox(height: 14),
             Obx(() => _TabBar(
                   active: controller.activeTab.value,
@@ -751,4 +775,48 @@ class _Pager extends StatelessWidget {
       );
     });
   }
+}
+
+/// Forces a reset to defaults (empty search, page size 10, page 1, Active
+/// tab, cleared date filters, "All Agents"/"All Partys", list view, plus
+/// a reload) exactly once every time the Estimate list screen is freshly
+/// navigated to — see the comment in `EstimationListView.build` for why
+/// this can't just live in `EstimationController.onInit()` alone. Being a
+/// `StatefulWidget`, Flutter builds a brand-new `State` for it on every
+/// fresh route push regardless of whether GetX handed back a reused
+/// controller instance or a new one.
+class _EstimationListFreshVisit extends StatefulWidget {
+  final EstimationController controller;
+  final Widget child;
+  const _EstimationListFreshVisit({
+    required this.controller,
+    required this.child,
+  });
+
+  @override
+  State<_EstimationListFreshVisit> createState() =>
+      _EstimationListFreshVisitState();
+}
+
+class _EstimationListFreshVisitState
+    extends State<_EstimationListFreshVisit> {
+  @override
+  void initState() {
+    super.initState();
+    // resetForFreshVisit() mutates Rx values (searchQuery, currentPage,
+    // pageSize, activeTab, filterFrom, filterTo, filterAgent, filterParty,
+    // isTableView...), which makes every Obx watching them ask to rebuild.
+    // Calling that synchronously here — inside initState(), which itself
+    // runs as part of mounting this very widget tree — asks Flutter to
+    // rebuild a widget while its own ancestors (EstimationListView) are
+    // still mid-build, which throws "setState() or markNeedsBuild() called
+    // during build". Deferring to right after this frame finishes avoids
+    // that entirely.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.controller.resetForFreshVisit();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
