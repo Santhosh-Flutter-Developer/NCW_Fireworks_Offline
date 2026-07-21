@@ -51,6 +51,26 @@ class PriceUploadController extends GetxController {
   @override
   void onInit() {
     super.onInit();
+    resetForFreshVisit();
+  }
+
+  /// Called every time the Price Upload screen is freshly entered via
+  /// navigation (see `_PriceUploadFreshVisit` in
+  /// `price_upload_list_view.dart`). GetX only disposes a `lazyPut`
+  /// controller once every route bound to it has been fully popped — if
+  /// the sidebar pushes this route again while an earlier visit is still
+  /// further down the Navigator stack, the *same* controller instance
+  /// gets reused and `onInit()` never runs a second time. This puts it
+  /// back to a clean slate regardless — both filters back to "All", page
+  /// limit back to 10, first page, list view (not table view) — then
+  /// reloads. Works the same online or offline since [fetchPriceList]
+  /// already falls back to the local cache when there's no connection.
+  void resetForFreshVisit() {
+    filterPricelistId.value = null;
+    filterProductId.value = null;
+    pageLimit.value = 10;
+    pageNumber.value = 1;
+    isTableView.value = false;
     fetchPriceList();
   }
 

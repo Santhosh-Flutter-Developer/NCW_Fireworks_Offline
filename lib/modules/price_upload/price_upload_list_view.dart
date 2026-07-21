@@ -16,108 +16,161 @@ class PriceUploadListView extends GetView<PriceUploadController> {
 
   @override
   Widget build(BuildContext context) {
-    return AppScaffold(
-      routeName: AppRoutes.priceUpload,
-      title: 'Product Price',
-      body: SingleChildScrollView(
-        padding: EdgeInsets.symmetric(
-          horizontal: Responsive.horizontalPadding(context),
-          vertical: 16,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _FilterBar(controller: controller),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                _PageSizeSelector(controller: controller),
-                const Spacer(),
-                Obx(
-                  () => _CircleIconButton(
-                    icon: Icons.file_download_rounded,
-                    color: AppColors.success,
-                    tooltip: 'Export',
-                    isBusy: controller.isExporting.value,
-                    onTap: controller.isExporting.value
-                        ? null
-                        : controller.exportToExcel,
-                  ),
-                ),
-                const SizedBox(
-                  width: 8.0,
-                ),
-                Obx(
-                  () => ViewModeToggle(
-                    isTableView: controller.isTableView.value,
-                    onChanged: controller.toggleViewMode,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Obx(() {
-              if (controller.isLoading.value && controller.rows.isEmpty) {
-                return const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 60),
-                  child: Center(child: CircularProgressIndicator()),
-                );
-              }
-              final error = controller.errorText.value;
-              if (error != null) {
-                return _ErrorState(message: error, onRetry: controller.retry);
-              }
-              final list = controller.rows;
-              if (list.isEmpty) {
-                return const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 40),
-                  child: EmptyState(
-                    icon: Icons.sell_outlined,
-                    title: 'No prices found',
-                    subtitle: 'Try a different pricelist or product filter.',
-                  ),
-                );
-              }
-              return Stack(
+    // GetX only disposes a `lazyPut` controller once every route bound to
+    // it has been fully popped off the Navigator stack — if the sidebar
+    // re-pushes this route while an earlier visit is still buried
+    // further down the stack, `controller` here is the *same* instance
+    // as last time, and `onInit()` (which only ever runs once per
+    // instance) can't be relied on to reset it. `_PriceUploadFreshVisit`
+    // sidesteps that entirely: it's a brand-new widget subtree on every
+    // navigation-in (Flutter always builds a fresh `State` for a freshly
+    // pushed route), so its `initState()` reliably fires exactly once
+    // per visit — see `PriceUploadController.resetForFreshVisit`.
+    return _PriceUploadFreshVisit(
+      controller: controller,
+      child: AppScaffold(
+        routeName: AppRoutes.priceUpload,
+        title: 'Product Price',
+        body: SingleChildScrollView(
+          padding: EdgeInsets.symmetric(
+            horizontal: Responsive.horizontalPadding(context),
+            vertical: 16,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _FilterBar(controller: controller),
+              const SizedBox(height: 16),
+              Row(
                 children: [
-                  controller.isTableView.value
-                      ? _PriceTable(list: list, controller: controller)
-                      : Column(
-                          children: List.generate(list.length, (i) {
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 10),
-                              child: _PriceTile(
-                                row: list[i],
-                                controller: controller,
-                              ),
-                            );
-                          }),
-                        ),
-                  if (controller.isLoading.value)
-                    Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: LinearProgressIndicator(
-                          minHeight: 3,
-                          color: AppColors.gold,
-                          backgroundColor: Colors.transparent,
+                  _PageSizeSelector(controller: controller),
+                  const Spacer(),
+                  Obx(
+                    () => _CircleIconButton(
+                      icon: Icons.file_download_rounded,
+                      color: AppColors.success,
+                      tooltip: 'Export',
+                      isBusy: controller.isExporting.value,
+                      onTap: controller.isExporting.value
+                          ? null
+                          : controller.exportToExcel,
+                    ),
+                  ),
+                  const SizedBox(
+                    width: 8.0,
+                  ),
+                  Obx(
+                    () => ViewModeToggle(
+                      isTableView: controller.isTableView.value,
+                      onChanged: controller.toggleViewMode,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Obx(() {
+                if (controller.isLoading.value && controller.rows.isEmpty) {
+                  return const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 60),
+                    child: Center(child: CircularProgressIndicator()),
+                  );
+                }
+                final error = controller.errorText.value;
+                if (error != null) {
+                  return _ErrorState(message: error, onRetry: controller.retry);
+                }
+                final list = controller.rows;
+                if (list.isEmpty) {
+                  return const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 40),
+                    child: EmptyState(
+                      icon: Icons.sell_outlined,
+                      title: 'No prices found',
+                      subtitle: 'Try a different pricelist or product filter.',
+                    ),
+                  );
+                }
+                return Stack(
+                  children: [
+                    controller.isTableView.value
+                        ? _PriceTable(list: list, controller: controller)
+                        : Column(
+                            children: List.generate(list.length, (i) {
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: _PriceTile(
+                                  row: list[i],
+                                  controller: controller,
+                                ),
+                              );
+                            }),
+                          ),
+                    if (controller.isLoading.value)
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: LinearProgressIndicator(
+                            minHeight: 3,
+                            color: AppColors.gold,
+                            backgroundColor: Colors.transparent,
+                          ),
                         ),
                       ),
-                    ),
-                ],
-              );
-            }),
-            const SizedBox(height: 14),
-            _Pager(controller: controller),
-            const SizedBox(height: 24),
-          ],
+                  ],
+                );
+              }),
+              const SizedBox(height: 14),
+              _Pager(controller: controller),
+              const SizedBox(height: 24),
+            ],
+          ),
         ),
       ),
     );
   }
+}
+
+/// Forces a reset to defaults (both filters back to "All", page limit 10,
+/// page 1, list view) exactly once every time the Price Upload screen is
+/// freshly navigated to — see the comment in `PriceUploadListView.build`
+/// for why this can't just live in `PriceUploadController.onInit()`
+/// alone. Being a `StatefulWidget`, Flutter builds a brand-new `State`
+/// for it on every fresh route push regardless of whether GetX handed
+/// back a reused controller instance or a new one.
+class _PriceUploadFreshVisit extends StatefulWidget {
+  final PriceUploadController controller;
+  final Widget child;
+  const _PriceUploadFreshVisit({
+    required this.controller,
+    required this.child,
+  });
+
+  @override
+  State<_PriceUploadFreshVisit> createState() =>
+      _PriceUploadFreshVisitState();
+}
+
+class _PriceUploadFreshVisitState extends State<_PriceUploadFreshVisit> {
+  @override
+  void initState() {
+    super.initState();
+    // resetForFreshVisit() mutates Rx values, which makes every Obx
+    // watching them ask to rebuild. Calling that synchronously here —
+    // inside initState(), which itself runs as part of mounting this
+    // very widget tree — asks Flutter to rebuild a widget while its own
+    // ancestors (PriceUploadListView) are still mid-build, which throws
+    // "setState() or markNeedsBuild() called during build". Deferring to
+    // right after this frame finishes avoids that entirely.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.controller.resetForFreshVisit();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 // ---------------------------------------------------------------------------
