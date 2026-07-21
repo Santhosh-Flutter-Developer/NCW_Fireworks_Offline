@@ -80,6 +80,12 @@ class QuotationController extends GetxController {
   final totalPagesRx = 1.obs;
   int get totalPages => totalPagesRx.value;
 
+  /// Bumped on every `loadQuotations()` call; a response is only applied
+  /// if it's still the most recent request when it comes back — guards
+  /// against rapid page/filter/tab changes firing overlapping requests
+  /// whose responses arrive out of order and clobber the current page.
+  int _requestId = 0;
+
   Timer? _searchDebounce;
 
   // ---- Form state ---------------------------------------------------------
@@ -142,6 +148,7 @@ class QuotationController extends GetxController {
   }
 
   Future<void> loadQuotations() async {
+    final requestId = ++_requestId;
     isLoadingList.value = true;
     try {
       final result = await _quotationRepository.listQuotations(
@@ -158,6 +165,7 @@ class QuotationController extends GetxController {
         drafted: activeTab.value == QuotationTab.draft ? '1' : '0',
         cancelled: activeTab.value == QuotationTab.cancel ? '1' : '0',
       );
+      if (requestId != _requestId) return; // A newer request has since started.
 
       final rowStatus = switch (activeTab.value) {
         QuotationTab.active => DocStatus.active,
@@ -197,12 +205,21 @@ class QuotationController extends GetxController {
         );
       }));
 
-      // No total-row/page count comes back from this endpoint — infer
-      // from whether this page was full, same heuristic as PartyController.
-      totalPagesRx.value = result.items.length < pageSize.value
-          ? currentPage.value
-          : currentPage.value + 1;
+      // Prefer the known total row count derived from the last sync (see
+      // QuotationRepository._cachedTotalCount) — this stays fixed while
+      // paging instead of growing by one every time Next is tapped. Only
+      // falls back to inferring from "was this page full" when nothing's
+      // been synced yet to count against.
+      final totalRecords = result.totalRecords;
+      totalPagesRx.value = totalRecords != null
+          ? (totalRecords <= 0
+              ? 1
+              : (totalRecords / pageSize.value).ceil())
+          : (result.items.length < pageSize.value
+              ? currentPage.value
+              : currentPage.value + 1);
     } on ApiRequestException catch (e) {
+      if (requestId != _requestId) return;
       final looksLikeEmptyResult = e.message.toLowerCase().contains('no') &&
           (e.message.toLowerCase().contains('record') ||
               e.message.toLowerCase().contains('quotation') ||
@@ -214,12 +231,13 @@ class QuotationController extends GetxController {
             snackPosition: SnackPosition.BOTTOM);
       }
     } on ApiException catch (e) {
+      if (requestId != _requestId) return;
       quotations.clear();
       totalPagesRx.value = 1;
       Get.snackbar('Could not load quotations', e.message,
           snackPosition: SnackPosition.BOTTOM);
     } finally {
-      isLoadingList.value = false;
+      if (requestId == _requestId) isLoadingList.value = false;
     }
   }
 
@@ -267,6 +285,7 @@ class QuotationController extends GetxController {
   }
 
   void setPageNo(int page) {
+    if (isLoadingList.value || page == currentPage.value) return;
     currentPage.value = page;
     loadQuotations();
   }

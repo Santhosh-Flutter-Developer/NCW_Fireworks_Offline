@@ -50,12 +50,21 @@ class EstimateListResponseModel {
   final List<IdName> agentList;
   final List<IdName> partyList;
 
+  /// Total rows matching the current filters, independent of pagination —
+  /// derived from the fully-synced local cache (see
+  /// `EstimateRepository._cachedTotalCount`), not from this particular
+  /// page's response. Null when there's no synced snapshot yet to count
+  /// against, in which case the caller falls back to inferring "is there
+  /// a next page" from whether this page came back full.
+  final int? totalRecords;
+
   const EstimateListResponseModel({
     required this.code,
     required this.message,
     required this.items,
     required this.agentList,
     required this.partyList,
+    this.totalRecords,
   });
 
   bool get isSuccess => code == 200;

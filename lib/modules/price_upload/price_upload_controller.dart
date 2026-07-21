@@ -23,9 +23,25 @@ class PriceUploadController extends GetxController {
   final pageLimit = 10.obs;
   final pageNumber = 1.obs;
 
+  // Pagination total. Preferably the exact count of cached (synced) rows
+  // matching the current filters (see
+  // ProductPriceRepository._cachedTotalCount) — stays fixed while paging
+  // instead of growing by one every time Next is tapped. Only falls back
+  // to inferring from "was this page full" when nothing's been synced
+  // yet to count against.
+  final totalPagesRx = 1.obs;
+  int get totalPages => totalPagesRx.value;
+
   final isLoading = false.obs;
   final RxnString errorText = RxnString();
   final isExporting = false.obs;
+
+  /// Bumped on every `fetchPriceList()` call; a response is only applied
+  /// if it's still the most recent request when it comes back. Without
+  /// this, rapid page/filter taps can fire overlapping requests whose
+  /// responses arrive out of order and clobber the current page with
+  /// stale data.
+  int _requestId = 0;
 
   /// Large enough to pull every row matching the current filters in one
   /// call — export should cover the whole filtered list, not just the
@@ -39,12 +55,14 @@ class PriceUploadController extends GetxController {
   }
 
   /// The API paginates but doesn't return a total row count, so "is there
-  /// a next page" is inferred from whether this page came back full.
-  bool get hasNextPage => rows.length >= pageLimit.value;
+  /// a next page" is inferred from whether this page came back full —
+  /// same heuristic as [totalPagesRx] below.
+  bool get hasNextPage => pageNumber.value < totalPages;
 
   bool get hasPrevPage => pageNumber.value > 1;
 
   Future<void> fetchPriceList() async {
+    final requestId = ++_requestId;
     isLoading.value = true;
     errorText.value = null;
     try {
@@ -54,6 +72,7 @@ class PriceUploadController extends GetxController {
         pageNumber: pageNumber.value,
         pageLimit: pageLimit.value,
       );
+      if (requestId != _requestId) return; // A newer request has since started.
       rows.assignAll(result.rows);
       // The master dropdown lists come back on every call — only refresh
       // them when populated, so a filtered/edge-case response can't wipe
@@ -64,12 +83,32 @@ class PriceUploadController extends GetxController {
       if (result.products.isNotEmpty) {
         productOptions.assignAll(result.products);
       }
+
+      // Prefer the known total row count derived from the last sync (see
+      // ProductPriceRepository._cachedTotalCount) — this stays fixed
+      // while paging instead of growing by one every time Next is
+      // tapped. Only falls back to inferring from "was this page full"
+      // when nothing's been synced yet to count against.
+      final totalRecords = result.totalRecords;
+      totalPagesRx.value = totalRecords != null
+          ? (totalRecords <= 0
+              ? 1
+              : (totalRecords / pageLimit.value).ceil())
+          : (result.rows.length < pageLimit.value
+              ? pageNumber.value
+              : pageNumber.value + 1);
     } on ApiException catch (e) {
+      if (requestId != _requestId) return;
       errorText.value = e.message;
+      rows.clear();
+      totalPagesRx.value = 1;
     } catch (_) {
+      if (requestId != _requestId) return;
       errorText.value = 'Something went wrong. Please try again.';
+      rows.clear();
+      totalPagesRx.value = 1;
     } finally {
-      isLoading.value = false;
+      if (requestId == _requestId) isLoading.value = false;
     }
   }
 
@@ -91,22 +130,31 @@ class PriceUploadController extends GetxController {
     fetchPriceList();
   }
 
+  /// Jumps to [page], clamped to the known valid range — mirrors
+  /// `PartyController`/`QuotationController`/`EstimationController`'s
+  /// `goToPage`. Ignored while a fetch is already in flight so rapid
+  /// taps can't fire overlapping requests that land out of order.
+  void goToPage(int page) {
+    if (isLoading.value) return;
+    final target = page.clamp(1, totalPages);
+    if (target == pageNumber.value) return;
+    pageNumber.value = target;
+    fetchPriceList();
+  }
+
   void nextPage() {
     if (!hasNextPage || isLoading.value) return;
-    pageNumber.value += 1;
-    fetchPriceList();
+    goToPage(pageNumber.value + 1);
   }
 
   void prevPage() {
     if (!hasPrevPage || isLoading.value) return;
-    pageNumber.value -= 1;
-    fetchPriceList();
+    goToPage(pageNumber.value - 1);
   }
 
   void firstPage() {
     if (pageNumber.value == 1 || isLoading.value) return;
-    pageNumber.value = 1;
-    fetchPriceList();
+    goToPage(1);
   }
 
   void toggleViewMode(bool table) => isTableView.value = table;

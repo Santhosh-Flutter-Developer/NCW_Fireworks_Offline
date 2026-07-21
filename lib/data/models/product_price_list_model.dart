@@ -99,11 +99,20 @@ class ProductPriceListResponse {
   final List<PricelistOption> pricelists;
   final List<ProductOption> products;
 
+  /// Total rows matching the current filters, independent of pagination —
+  /// derived from the fully-synced local cache (see
+  /// `ProductPriceRepository._cachedTotalCount`), not from this
+  /// particular page's response. Null when there's no synced snapshot yet
+  /// to count against, in which case the caller falls back to inferring
+  /// "is there a next page" from whether this page came back full.
+  final int? totalRecords;
+
   const ProductPriceListResponse({
     required this.code,
     required this.rows,
     required this.pricelists,
     required this.products,
+    this.totalRecords,
   });
 
   factory ProductPriceListResponse.fromJson(Map<String, dynamic> json) {

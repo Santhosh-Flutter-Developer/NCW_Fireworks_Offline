@@ -146,7 +146,31 @@ class EstimateRepository {
       );
 
       final result = EstimateListResponseModel.fromJson(json);
-      if (result.isSuccess) return result;
+      if (result.isSuccess) {
+        // The server's own page response never carries a total row count,
+        // but the last full sync did pull down every row for this tab —
+        // so the *known* total is however many of those cached rows still
+        // match the filters being applied right now. This keeps
+        // "page / totalPages" stable while paging instead of growing by
+        // one every time Next is tapped. Falls back to null (→ the old
+        // "was this page full" heuristic) if nothing has been synced yet.
+        return EstimateListResponseModel(
+          code: result.code,
+          message: result.message,
+          items: result.items,
+          agentList: result.agentList,
+          partyList: result.partyList,
+          totalRecords: _cachedTotalCount(
+            drafted: drafted,
+            cancelled: cancelled,
+            filterFromDate: filterFromDate,
+            filterToDate: filterToDate,
+            searchText: searchText,
+            filterAgentId: filterAgentId,
+            filterPartyId: filterPartyId,
+          ),
+        );
+      }
 
       throw ApiRequestException(result.message);
     } on NetworkException {
@@ -178,8 +202,10 @@ class EstimateRepository {
 
   /// [drafted]/[cancelled] pick which cached tab snapshot to read from —
   /// [DataSyncService] stores Active/Draft/Cancel separately, the same
-  /// split the server's `drafted`/`cancelled` flags produce.
-  EstimateListResponseModel _estimatesFromCache({
+  /// split the server's `drafted`/`cancelled` flags produce. Returns
+  /// every cached row matching the given filters, unpaginated — shared by
+  /// the offline list path and by [_cachedTotalCount].
+  List<EstimateListItem> _filterCachedEstimates({
     required String drafted,
     required String cancelled,
     required String filterFromDate,
@@ -187,8 +213,6 @@ class EstimateRepository {
     required String searchText,
     required String filterAgentId,
     required String filterPartyId,
-    required int? pageNumber,
-    required int? pageLimit,
   }) {
     final cacheKey = cancelled == '1'
         ? CacheKeys.estimationCancel
@@ -228,7 +252,7 @@ class EstimateRepository {
     final partyName =
         filterPartyId.isEmpty ? null : nameForId(partyList, filterPartyId);
 
-    final filtered = all.where((e) {
+    return all.where((e) {
       if (!matchesDateRange(e.estimateDate, filterFromDate, filterToDate)) {
         return false;
       }
@@ -249,6 +273,75 @@ class EstimateRepository {
         e.partyNameMobileCity,
       ]);
     }).toList();
+  }
+
+  /// How many *cached* rows currently match the given filters — used to
+  /// give the online path a stable total count even though the live
+  /// server response doesn't include one. Returns null when nothing has
+  /// been synced for this tab yet (an empty cache means "unknown", not
+  /// "zero rows").
+  int? _cachedTotalCount({
+    required String drafted,
+    required String cancelled,
+    required String filterFromDate,
+    required String filterToDate,
+    required String searchText,
+    required String filterAgentId,
+    required String filterPartyId,
+  }) {
+    final cacheKey = cancelled == '1'
+        ? CacheKeys.estimationCancel
+        : (drafted == '1'
+            ? CacheKeys.estimationDraft
+            : CacheKeys.estimationActive);
+    if (_cache.getJsonList(cacheKey).isEmpty) return null;
+
+    return _filterCachedEstimates(
+      drafted: drafted,
+      cancelled: cancelled,
+      filterFromDate: filterFromDate,
+      filterToDate: filterToDate,
+      searchText: searchText,
+      filterAgentId: filterAgentId,
+      filterPartyId: filterPartyId,
+    ).length;
+  }
+
+  EstimateListResponseModel _estimatesFromCache({
+    required String drafted,
+    required String cancelled,
+    required String filterFromDate,
+    required String filterToDate,
+    required String searchText,
+    required String filterAgentId,
+    required String filterPartyId,
+    required int? pageNumber,
+    required int? pageLimit,
+  }) {
+    final filtered = _filterCachedEstimates(
+      drafted: drafted,
+      cancelled: cancelled,
+      filterFromDate: filterFromDate,
+      filterToDate: filterToDate,
+      searchText: searchText,
+      filterAgentId: filterAgentId,
+      filterPartyId: filterPartyId,
+    );
+
+    final agentList = _cache
+        .getJsonList(CacheKeys.estimationAgents)
+        .map((m) => IdName(
+              id: m['id']?.toString() ?? '',
+              name: m['name']?.toString() ?? '',
+            ))
+        .toList();
+    final partyList = _cache
+        .getJsonList(CacheKeys.estimationParties)
+        .map((m) => IdName(
+              id: m['id']?.toString() ?? '',
+              name: m['name']?.toString() ?? '',
+            ))
+        .toList();
 
     return EstimateListResponseModel(
       code: 200,
@@ -256,6 +349,7 @@ class EstimateRepository {
       items: paginate(filtered, pageNumber, pageLimit),
       agentList: agentList,
       partyList: partyList,
+      totalRecords: filtered.length,
     );
   }
 

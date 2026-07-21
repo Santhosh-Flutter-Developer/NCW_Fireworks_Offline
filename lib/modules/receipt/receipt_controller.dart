@@ -65,6 +65,12 @@ class ReceiptController extends GetxController {
   final totalPagesRx = 1.obs;
   int get totalPages => totalPagesRx.value;
 
+  /// Bumped on every `loadReceipts()` call; a response is only applied
+  /// if it's still the most recent request when it comes back — guards
+  /// against rapid page/filter/tab changes firing overlapping requests
+  /// whose responses arrive out of order and clobber the current page.
+  int _requestId = 0;
+
   Timer? _searchDebounce;
 
   // ---- Add Receipt form: static dropdown data -------------------------------
@@ -129,6 +135,7 @@ class ReceiptController extends GetxController {
   }
 
   Future<void> loadReceipts() async {
+    final requestId = ++_requestId;
     isLoadingList.value = true;
     try {
       final result = await _receiptRepository.listReceipts(
@@ -144,6 +151,7 @@ class ReceiptController extends GetxController {
         pageNumber: currentPage.value,
         pageLimit: pageSize.value,
       );
+      if (requestId != _requestId) return; // A newer request has since started.
 
       final rowStatus = switch (activeTab.value) {
         ReceiptTab.active => DocStatus.active,
@@ -176,17 +184,39 @@ class ReceiptController extends GetxController {
         );
       }));
 
-      totalPagesRx.value = receipts.length < pageSize.value
-          ? currentPage.value
-          : currentPage.value + 1;
+      // Prefer the known total row count derived from the last sync (see
+      // ReceiptRepository._cachedTotalCount) — this stays fixed while
+      // paging instead of growing by one every time Next is tapped. Only
+      // falls back to inferring from "was this page full" when nothing's
+      // been synced yet to count against.
+      final totalRecords = result.totalRecords;
+      totalPagesRx.value = totalRecords != null
+          ? (totalRecords <= 0
+              ? 1
+              : (totalRecords / pageSize.value).ceil())
+          : (receipts.length < pageSize.value
+              ? currentPage.value
+              : currentPage.value + 1);
     } on ApiRequestException catch (e) {
-      Get.snackbar('Could not load receipts', e.message,
-          snackPosition: SnackPosition.BOTTOM);
+      if (requestId != _requestId) return;
+      final looksLikeEmptyResult = e.message.toLowerCase().contains('no') &&
+          (e.message.toLowerCase().contains('record') ||
+              e.message.toLowerCase().contains('receipt') ||
+              e.message.toLowerCase().contains('data'));
+      receipts.clear();
+      totalPagesRx.value = 1;
+      if (!looksLikeEmptyResult) {
+        Get.snackbar('Could not load receipts', e.message,
+            snackPosition: SnackPosition.BOTTOM);
+      }
     } on ApiException catch (e) {
+      if (requestId != _requestId) return;
+      receipts.clear();
+      totalPagesRx.value = 1;
       Get.snackbar('Could not load receipts', e.message,
           snackPosition: SnackPosition.BOTTOM);
     } finally {
-      isLoadingList.value = false;
+      if (requestId == _requestId) isLoadingList.value = false;
     }
   }
 
@@ -255,6 +285,7 @@ class ReceiptController extends GetxController {
   }
 
   void setPageNo(int page) {
+    if (isLoadingList.value || page == currentPage.value) return;
     currentPage.value = page;
     loadReceipts();
   }

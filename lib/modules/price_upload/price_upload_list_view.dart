@@ -683,23 +683,23 @@ class _Pager extends StatelessWidget {
   Widget build(BuildContext context) {
     return Obx(() {
       final page = controller.pageNumber.value;
+      final pages = controller.totalPages;
       final count = controller.rows.length;
       final start =
           count == 0 ? 0 : (page - 1) * controller.pageLimit.value + 1;
       final end = start + count - 1;
       final busy = controller.isLoading.value;
 
-      return Row(
-        // alignment: WrapAlignment.spaceBetween,
-        // crossAxisAlignment: WrapCrossAlignment.center,
-        // spacing: 10,
-        // runSpacing: 8,
+      return Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 10,
+        runSpacing: 8,
         children: [
           Text(
             count == 0 ? 'Showing 0 entries' : 'Showing $start to $end',
             style: AppTextStyles.caption,
           ),
-          Spacer(),
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -724,7 +724,7 @@ class _Pager extends StatelessWidget {
                   gradient: AppColors.goldGradient,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Text('$page',
+                child: Text('$page / $pages',
                     style: AppTextStyles.bodyStrong
                         .copyWith(color: AppColors.textOnGold)),
               ),

@@ -598,6 +598,7 @@ class _Pager extends StatelessWidget {
       final countOnPage = controller.visibleReceipts.length;
       final pages = controller.totalPages;
       final page = controller.currentPage.value;
+      final busy = controller.isLoadingList.value;
 
       return Wrap(
         alignment: WrapAlignment.spaceBetween,
@@ -616,8 +617,9 @@ class _Pager extends StatelessWidget {
             children: [
               IconButton(
                 visualDensity: VisualDensity.compact,
-                onPressed:
-                    page > 1 ? () => controller.goToPage(page - 1) : null,
+                onPressed: page > 1 && !busy
+                    ? () => controller.goToPage(page - 1)
+                    : null,
                 icon: const Icon(Icons.chevron_left_rounded, size: 18),
               ),
               Container(
@@ -633,8 +635,9 @@ class _Pager extends StatelessWidget {
               ),
               IconButton(
                 visualDensity: VisualDensity.compact,
-                onPressed:
-                    page < pages ? () => controller.goToPage(page + 1) : null,
+                onPressed: page < pages && !busy
+                    ? () => controller.goToPage(page + 1)
+                    : null,
                 icon: const Icon(Icons.chevron_right_rounded, size: 18),
               ),
             ],

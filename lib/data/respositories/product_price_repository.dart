@@ -64,7 +64,23 @@ class ProductPriceRepository {
         );
       }
 
-      return result;
+      // The server's own page response never carries a total row count,
+      // but the last full sync did pull down every row — so the *known*
+      // total is however many of those cached rows still match the
+      // filters being applied right now. This keeps "page / totalPages"
+      // stable while paging instead of growing by one every time Next is
+      // tapped. Falls back to null (→ the old "was this page full"
+      // heuristic) if nothing has been synced yet.
+      return ProductPriceListResponse(
+        code: result.code,
+        rows: result.rows,
+        pricelists: result.pricelists,
+        products: result.products,
+        totalRecords: _cachedTotalCount(
+          pricelistId: pricelistId,
+          productId: productId,
+        ),
+      );
     } on NetworkException {
       return _priceListFromCache(
         pricelistId: pricelistId,
@@ -85,11 +101,11 @@ class ProductPriceRepository {
   /// Rows in the cache only carry pricelist/product *names* (same as the
   /// API), not ids, so a [pricelistId]/[productId] filter is resolved to
   /// a name via the cached dropdown options first, then matched by name.
-  ProductPriceListResponse _priceListFromCache({
+  /// Returns every cached row matching the given filters, unpaginated —
+  /// shared by the offline list path and by [_cachedTotalCount].
+  List<ProductPriceRow> _filterCachedRows({
     required String pricelistId,
     required String productId,
-    required int? pageNumber,
-    required int? pageLimit,
   }) {
     final rows = _cache
         .getJsonList(CacheKeys.priceRows)
@@ -116,7 +132,7 @@ class ProductPriceRepository {
     final productName =
         productId.isEmpty ? null : nameForId(products, productId);
 
-    final filtered = rows.where((r) {
+    return rows.where((r) {
       if (pricelistName != null && r.pricelistName != pricelistName) {
         return false;
       }
@@ -125,12 +141,48 @@ class ProductPriceRepository {
       }
       return true;
     }).toList();
+  }
+
+  /// How many *cached* rows currently match the given filters — used to
+  /// give the online path a stable total count even though the live
+  /// server response doesn't include one. Returns null when nothing has
+  /// been synced yet (an empty cache means "unknown", not "zero rows").
+  int? _cachedTotalCount({
+    required String pricelistId,
+    required String productId,
+  }) {
+    if (_cache.getJsonList(CacheKeys.priceRows).isEmpty) return null;
+    return _filterCachedRows(
+      pricelistId: pricelistId,
+      productId: productId,
+    ).length;
+  }
+
+  ProductPriceListResponse _priceListFromCache({
+    required String pricelistId,
+    required String productId,
+    required int? pageNumber,
+    required int? pageLimit,
+  }) {
+    final filtered = _filterCachedRows(
+      pricelistId: pricelistId,
+      productId: productId,
+    );
+    final pricelists = _cache
+        .getJsonList(CacheKeys.priceLists)
+        .map(PricelistOption.fromJson)
+        .toList();
+    final products = _cache
+        .getJsonList(CacheKeys.priceProducts)
+        .map(ProductOption.fromJson)
+        .toList();
 
     return ProductPriceListResponse(
       code: 200,
       rows: paginate(filtered, pageNumber, pageLimit),
       pricelists: pricelists,
       products: products,
+      totalRecords: filtered.length,
     );
   }
 }

@@ -118,7 +118,29 @@ class QuotationRepository {
       );
 
       final result = QuotationListResponseModel.fromJson(json);
-      if (result.isSuccess) return result;
+      if (result.isSuccess) {
+        // The server's own page response never carries a total row count,
+        // but the last full sync did pull down every row for this tab —
+        // so the *known* total is however many of those cached rows still
+        // match the filters being applied right now. This keeps
+        // "page / totalPages" stable while paging instead of growing by
+        // one every time Next is tapped. Falls back to null (→ the old
+        // "was this page full" heuristic) if nothing has been synced yet.
+        return QuotationListResponseModel(
+          code: result.code,
+          message: result.message,
+          items: result.items,
+          partyList: result.partyList,
+          totalRecords: _cachedTotalCount(
+            drafted: drafted,
+            cancelled: cancelled,
+            filterFromDate: filterFromDate,
+            filterToDate: filterToDate,
+            searchText: searchText,
+            filterPartyId: filterPartyId,
+          ),
+        );
+      }
 
       throw ApiRequestException(result.message);
     } on NetworkException {
@@ -148,16 +170,17 @@ class QuotationRepository {
 
   /// [drafted]/[cancelled] pick which cached tab snapshot to read from —
   /// [DataSyncService] stores Active/Draft/Cancel separately, the same
-  /// split the server's `drafted`/`cancelled` flags produce.
-  QuotationListResponseModel _quotationsFromCache({
+  /// split the server's `drafted`/`cancelled` flags produce. Returns
+  /// every cached row matching [filterFromDate]/[filterToDate]/
+  /// [searchText]/[filterPartyId], unpaginated — shared by the offline
+  /// list path and by [_cachedTotalCount].
+  List<QuotationListItem> _filterCachedQuotations({
     required String drafted,
     required String cancelled,
     required String filterFromDate,
     required String filterToDate,
     required String searchText,
     required String filterPartyId,
-    required int? pageNumber,
-    required int? pageLimit,
   }) {
     final cacheKey = cancelled == '1'
         ? CacheKeys.quotationCancel
@@ -176,7 +199,7 @@ class QuotationRepository {
             ))
         .toList();
 
-    final filtered = all.where((q) {
+    return all.where((q) {
       if (!matchesDateRange(q.quotationDate, filterFromDate, filterToDate)) {
         return false;
       }
@@ -199,12 +222,69 @@ class QuotationRepository {
         q.partyNameMobileCity,
       ]);
     }).toList();
+  }
+
+  /// How many *cached* rows currently match the given filters — used to
+  /// give the online path a stable total count even though the live
+  /// server response doesn't include one. Returns null when nothing has
+  /// been synced for this tab yet (an empty cache means "unknown", not
+  /// "zero rows").
+  int? _cachedTotalCount({
+    required String drafted,
+    required String cancelled,
+    required String filterFromDate,
+    required String filterToDate,
+    required String searchText,
+    required String filterPartyId,
+  }) {
+    final cacheKey = cancelled == '1'
+        ? CacheKeys.quotationCancel
+        : (drafted == '1' ? CacheKeys.quotationDraft : CacheKeys.quotationActive);
+    if (_cache.getJsonList(cacheKey).isEmpty) return null;
+
+    return _filterCachedQuotations(
+      drafted: drafted,
+      cancelled: cancelled,
+      filterFromDate: filterFromDate,
+      filterToDate: filterToDate,
+      searchText: searchText,
+      filterPartyId: filterPartyId,
+    ).length;
+  }
+
+  QuotationListResponseModel _quotationsFromCache({
+    required String drafted,
+    required String cancelled,
+    required String filterFromDate,
+    required String filterToDate,
+    required String searchText,
+    required String filterPartyId,
+    required int? pageNumber,
+    required int? pageLimit,
+  }) {
+    final filtered = _filterCachedQuotations(
+      drafted: drafted,
+      cancelled: cancelled,
+      filterFromDate: filterFromDate,
+      filterToDate: filterToDate,
+      searchText: searchText,
+      filterPartyId: filterPartyId,
+    );
+
+    final partyList = _cache
+        .getJsonList(CacheKeys.quotationParties)
+        .map((m) => IdName(
+              id: m['id']?.toString() ?? '',
+              name: m['name']?.toString() ?? '',
+            ))
+        .toList();
 
     return QuotationListResponseModel(
       code: 200,
       message: 'Loaded from offline data',
       items: paginate(filtered, pageNumber, pageLimit),
       partyList: partyList,
+      totalRecords: filtered.length,
     );
   }
 

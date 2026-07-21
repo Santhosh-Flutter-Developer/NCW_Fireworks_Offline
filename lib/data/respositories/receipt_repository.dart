@@ -155,7 +155,28 @@ class ReceiptRepository {
       );
 
       final result = ReceiptListResponseModel.fromJson(json);
-      if (result.isSuccess) return result;
+      if (result.isSuccess) {
+        // The server's own page response never carries a total row count,
+        // but the last full sync did pull down every row for this tab —
+        // so the *known* total is however many of those cached rows still
+        // match the filters being applied right now. This keeps
+        // "page / totalPages" stable while paging instead of growing by
+        // one every time Next is tapped. Falls back to null (→ the old
+        // "was this page full" heuristic) if nothing has been synced yet.
+        return ReceiptListResponseModel(
+          code: result.code,
+          message: result.message,
+          items: result.items,
+          partyList: result.partyList,
+          totalRecords: _cachedTotalCount(
+            cancelled: cancelled,
+            filterFromDate: filterFromDate,
+            filterToDate: filterToDate,
+            searchText: searchText,
+            filterPartyId: filterPartyId,
+          ),
+        );
+      }
 
       throw ApiRequestException(result.message);
     } on NetworkException {
@@ -184,14 +205,14 @@ class ReceiptRepository {
   /// [cancelled] picks which cached tab snapshot to read from —
   /// [DataSyncService] stores Active/Cancel separately (Receipts have no
   /// Draft tab), the same split the server's `cancelled` flag produces.
-  ReceiptListResponseModel _receiptsFromCache({
+  /// Returns every cached row matching the given filters, unpaginated —
+  /// shared by the offline list path and by [_cachedTotalCount].
+  List<ReceiptListItem> _filterCachedReceipts({
     required String cancelled,
     required String filterFromDate,
     required String filterToDate,
     required String searchText,
     required String filterPartyId,
-    required int? pageNumber,
-    required int? pageLimit,
   }) {
     final cacheKey =
         cancelled == '1' ? CacheKeys.receiptCancel : CacheKeys.receiptActive;
@@ -219,7 +240,7 @@ class ReceiptRepository {
     final partyName =
         filterPartyId.isEmpty ? null : nameForId(partyList, filterPartyId);
 
-    final filtered = all.where((r) {
+    return all.where((r) {
       if (!matchesDateRange(r.receiptDate, filterFromDate, filterToDate)) {
         return false;
       }
@@ -233,12 +254,64 @@ class ReceiptRepository {
         r.agentName,
       ]);
     }).toList();
+  }
+
+  /// How many *cached* rows currently match the given filters — used to
+  /// give the online path a stable total count even though the live
+  /// server response doesn't include one. Returns null when nothing has
+  /// been synced for this tab yet (an empty cache means "unknown", not
+  /// "zero rows").
+  int? _cachedTotalCount({
+    required String cancelled,
+    required String filterFromDate,
+    required String filterToDate,
+    required String searchText,
+    required String filterPartyId,
+  }) {
+    final cacheKey =
+        cancelled == '1' ? CacheKeys.receiptCancel : CacheKeys.receiptActive;
+    if (_cache.getJsonList(cacheKey).isEmpty) return null;
+
+    return _filterCachedReceipts(
+      cancelled: cancelled,
+      filterFromDate: filterFromDate,
+      filterToDate: filterToDate,
+      searchText: searchText,
+      filterPartyId: filterPartyId,
+    ).length;
+  }
+
+  ReceiptListResponseModel _receiptsFromCache({
+    required String cancelled,
+    required String filterFromDate,
+    required String filterToDate,
+    required String searchText,
+    required String filterPartyId,
+    required int? pageNumber,
+    required int? pageLimit,
+  }) {
+    final filtered = _filterCachedReceipts(
+      cancelled: cancelled,
+      filterFromDate: filterFromDate,
+      filterToDate: filterToDate,
+      searchText: searchText,
+      filterPartyId: filterPartyId,
+    );
+
+    final partyList = _cache
+        .getJsonList(CacheKeys.receiptParties)
+        .map((m) => IdName(
+              id: m['id']?.toString() ?? '',
+              name: m['name']?.toString() ?? '',
+            ))
+        .toList();
 
     return ReceiptListResponseModel(
       code: 200,
       message: 'Loaded from offline data',
       items: paginate(filtered, pageNumber, pageLimit),
       partyList: partyList,
+      totalRecords: filtered.length,
     );
   }
 
