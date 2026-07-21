@@ -55,7 +55,6 @@ class _QuotationListBody extends StatelessWidget {
       actions: [
         SyncActionButton(
           onSync: Get.find<DataSyncService>().syncQuotations,
-          onSynced: controller.loadQuotations,
         ),
       ],
       floatingActionButton: FloatingActionButton.extended(

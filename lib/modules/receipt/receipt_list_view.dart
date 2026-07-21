@@ -54,7 +54,6 @@ class _ReceiptListBody extends StatelessWidget {
       actions: [
         SyncActionButton(
           onSync: Get.find<DataSyncService>().syncReceipts,
-          onSynced: controller.loadReceipts,
         ),
       ],
       // floatingActionButton: FloatingActionButton.extended(

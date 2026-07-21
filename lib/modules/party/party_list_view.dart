@@ -18,16 +18,6 @@ class PartyListView extends GetView<PartyController> {
 
   @override
   Widget build(BuildContext context) {
-    // GetX only disposes a `lazyPut` controller once every route bound to
-    // it has been fully popped off the Navigator stack — if the sidebar
-    // re-pushes `/party` while an earlier visit is still buried further
-    // down the stack, `controller` here is the *same* instance as last
-    // time, and `onInit()` (which only ever runs once per instance) can't
-    // be relied on to reset it. `_PartyListFreshVisit` sidesteps that
-    // entirely: it's a brand-new widget subtree on every navigation-in
-    // (Flutter always builds a fresh `State` for a freshly pushed route),
-    // so its `initState()` reliably fires exactly once per visit — see
-    // `PartyController.resetForFreshVisit`.
     return _PartyListFreshVisit(
       controller: controller,
       child: AppScaffold(
@@ -36,7 +26,6 @@ class PartyListView extends GetView<PartyController> {
         actions: [
           SyncActionButton(
             onSync: Get.find<DataSyncService>().syncParty,
-            onSynced: controller.loadParties,
           ),
         ],
         body: Padding(

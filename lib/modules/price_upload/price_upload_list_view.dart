@@ -36,7 +36,6 @@ class PriceUploadListView extends GetView<PriceUploadController> {
         actions: [
           SyncActionButton(
             onSync: Get.find<DataSyncService>().syncPriceList,
-            onSynced: controller.fetchPriceList,
           ),
         ],
         body: SingleChildScrollView(

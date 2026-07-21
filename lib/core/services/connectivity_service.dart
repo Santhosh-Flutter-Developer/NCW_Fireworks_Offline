@@ -26,6 +26,7 @@ import '../theme/app_text_styles.dart';
 class ConnectivityService extends GetxService {
   final Connectivity _connectivity = Connectivity();
   StreamSubscription<List<ConnectivityResult>>? _subscription;
+  Timer? _pollTimer;
 
   final isOnline = true.obs;
 
@@ -39,15 +40,31 @@ class ConnectivityService extends GetxService {
       WidgetsBinding.instance.addPostFrameCallback((_) => _showOfflineToast());
     }
     _subscription = _connectivity.onConnectivityChanged.listen((result) {
-      final nowOnline = _hasInterface(result);
-      // Only toast on the actual online→offline transition — not on
-      // every reconnect blip, and not repeatedly while already offline.
-      if (isOnline.value && !nowOnline) {
-        _showOfflineToast();
-      }
-      isOnline.value = nowOnline;
+      _applyResult(result);
+    });
+    // Fallback safety net: `onConnectivityChanged` doesn't fire reliably on
+    // every platform/device (some emulators and some real devices miss the
+    // interface-up event, e.g. a Wi-Fi reconnect that doesn't briefly drop
+    // to "none" first) — without this, `isOnline` (and anything reactive
+    // to it, like the Sync button) could get stuck showing "offline" until
+    // the app is restarted. Polling every few seconds catches that case
+    // and self-corrects, with no visible effect when the stream is already
+    // keeping things in sync.
+    _pollTimer = Timer.periodic(const Duration(seconds: 4), (_) async {
+      _applyResult(await _connectivity.checkConnectivity());
     });
     return this;
+  }
+
+  void _applyResult(List<ConnectivityResult> result) {
+    final nowOnline = _hasInterface(result);
+    if (isOnline.value == nowOnline) return;
+    // Only toast on the actual online→offline transition — not on
+    // every reconnect blip, and not repeatedly while already offline.
+    if (isOnline.value && !nowOnline) {
+      _showOfflineToast();
+    }
+    isOnline.value = nowOnline;
   }
 
   void _showOfflineToast() {
@@ -143,6 +160,7 @@ class ConnectivityService extends GetxService {
   @override
   void onClose() {
     _subscription?.cancel();
+    _pollTimer?.cancel();
     super.onClose();
   }
 }

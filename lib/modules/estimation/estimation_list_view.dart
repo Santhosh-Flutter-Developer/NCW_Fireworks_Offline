@@ -55,7 +55,6 @@ class _EstimationListBody extends StatelessWidget {
       actions: [
         SyncActionButton(
           onSync: Get.find<DataSyncService>().syncEstimations,
-          onSynced: controller.loadEstimates,
         ),
       ],
       floatingActionButton: FloatingActionButton.extended(
