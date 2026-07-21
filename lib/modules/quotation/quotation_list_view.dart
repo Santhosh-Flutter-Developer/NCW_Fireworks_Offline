@@ -23,6 +23,30 @@ class QuotationListView extends GetView<QuotationController> {
 
   @override
   Widget build(BuildContext context) {
+    // GetX only disposes a `lazyPut` controller once every route bound to
+    // it has been fully popped off the Navigator stack — if the sidebar
+    // re-pushes `/quotation` while an earlier visit is still buried further
+    // down the stack, `controller` here is the *same* instance as last
+    // time, and `onInit()` (which only ever runs once per instance) can't
+    // be relied on to reset it. `_QuotationListFreshVisit` sidesteps that
+    // entirely: it's a brand-new widget subtree on every navigation-in
+    // (Flutter always builds a fresh `State` for a freshly pushed route),
+    // so its `initState()` reliably fires exactly once per visit — see
+    // `QuotationController.resetForFreshVisit`.
+    return _QuotationListFreshVisit(
+      controller: controller,
+      child: _QuotationListBody(controller: controller, df: _df),
+    );
+  }
+}
+
+class _QuotationListBody extends StatelessWidget {
+  final QuotationController controller;
+  final DateFormat df;
+  const _QuotationListBody({required this.controller, required this.df});
+
+  @override
+  Widget build(BuildContext context) {
     return AppScaffold(
       routeName: AppRoutes.quotationList,
       title: 'Quotation',
@@ -47,7 +71,7 @@ class QuotationListView extends GetView<QuotationController> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _FilterBar(controller: controller, df: _df),
+            _FilterBar(controller: controller, df: df),
             const SizedBox(height: 14),
             Obx(() => _TabBar(
                   active: controller.activeTab.value,
@@ -698,4 +722,47 @@ class _Pager extends StatelessWidget {
       );
     });
   }
+}
+
+/// Forces a reset to defaults (empty search, page size 10, page 1, Active
+/// tab, cleared date filters, "All Partys", list view, plus a reload)
+/// exactly once every time the Quotation list screen is freshly navigated
+/// to — see the comment in `QuotationListView.build` for why this can't
+/// just live in `QuotationController.onInit()` alone. Being a
+/// `StatefulWidget`, Flutter builds a brand-new `State` for it on every
+/// fresh route push regardless of whether GetX handed back a reused
+/// controller instance or a new one.
+class _QuotationListFreshVisit extends StatefulWidget {
+  final QuotationController controller;
+  final Widget child;
+  const _QuotationListFreshVisit({
+    required this.controller,
+    required this.child,
+  });
+
+  @override
+  State<_QuotationListFreshVisit> createState() =>
+      _QuotationListFreshVisitState();
+}
+
+class _QuotationListFreshVisitState extends State<_QuotationListFreshVisit> {
+  @override
+  void initState() {
+    super.initState();
+    // resetForFreshVisit() mutates Rx values (searchQuery, currentPage,
+    // pageSize, activeTab, filterFrom, filterTo, filterParty,
+    // isTableView...), which makes every Obx watching them ask to rebuild.
+    // Calling that synchronously here — inside initState(), which itself
+    // runs as part of mounting this very widget tree — asks Flutter to
+    // rebuild a widget while its own ancestors (QuotationListView) are
+    // still mid-build, which throws "setState() or markNeedsBuild() called
+    // during build". Deferring to right after this frame finishes avoids
+    // that entirely.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.controller.resetForFreshVisit();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
