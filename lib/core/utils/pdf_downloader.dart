@@ -5,8 +5,10 @@ import 'package:file_saver/file_saver.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 
-/// Cross-platform helper that actually downloads a report PDF (as opposed
-/// to just opening it in a viewer) and hands the bytes to `file_saver`.
+/// Cross-platform helper that saves PDF bytes to disk via `file_saver` —
+/// either fetched from a live report endpoint ([download]) or already in
+/// hand from a PDF built entirely on-device, with no network call at all
+/// ([saveBytes] — see `QuotationPdfBuilder`).
 ///
 /// - Web: triggers a normal browser download.
 /// - Android: opens the native "Save As" picker (Storage Access Framework)
@@ -14,11 +16,6 @@ import 'package:http/http.dart' as http;
 ///   as [ExcelExporter], saveFile() alone would write to the app's
 ///   private, invisible storage on Android.
 /// - iOS / desktop: saves via file_saver's normal saveFile() location.
-///
-/// This is deliberately separate from "Print", which just opens the same
-/// report URL externally via `launchUrl` and lets the browser/OS PDF
-/// viewer's own print button do the rest — Download needs to fetch and
-/// persist the actual bytes.
 class PdfDownloader {
   const PdfDownloader._();
 
@@ -52,19 +49,29 @@ class PdfDownloader {
       throw Exception('The report came back empty.');
     }
 
+    await saveBytes(bytes: Uint8List.fromList(bytes), fileName: fileName);
+  }
+
+  /// Saves already-generated PDF bytes to disk — shared by [download]
+  /// (network-fetched bytes) and by any report built entirely on-device
+  /// (e.g. `QuotationPdfBuilder`, which never touches the network at all).
+  static Future<void> saveBytes({
+    required Uint8List bytes,
+    required String fileName,
+  }) async {
     final safeName = _sanitizeFileName(fileName);
 
     if (!kIsWeb && Platform.isAndroid) {
       await FileSaver.instance.saveAs(
         name: safeName,
-        bytes: Uint8List.fromList(bytes),
+        bytes: bytes,
         fileExtension: 'pdf',
         mimeType: MimeType.pdf,
       );
     } else {
       await FileSaver.instance.saveFile(
         name: safeName,
-        bytes: Uint8List.fromList(bytes),
+        bytes: bytes,
         fileExtension: 'pdf',
         mimeType: MimeType.pdf,
       );

@@ -270,6 +270,24 @@ class PartyRepository {
     throw ApiRequestException(result.message);
   }
 
+  /// Full cached details for one party by id — checks the pending queue
+  /// first (so an unsynced edit wins), then the synced cache. Used to
+  /// build the "Bill To" block when generating a quotation PDF entirely
+  /// offline (see `QuotationPdfBuilder`), since a quotation only stores
+  /// its party's id, not a full address snapshot.
+  PartyListItem? cachedPartyById(String partyId) {
+    if (partyId.isEmpty) return null;
+    for (final row in _cache.getJsonList(CacheKeys.partyPending)) {
+      final item = PartyListItem.fromPendingRow(row);
+      if (item.partyId == partyId) return item;
+    }
+    for (final row in _cache.getJsonList(CacheKeys.party)) {
+      final item = PartyListItem.fromJson(row);
+      if (item.partyId == partyId) return item;
+    }
+    return null;
+  }
+
   /// Builds a page of results from whatever [DataSyncService] last cached,
   /// merged with anything still sitting in the pending-sync queue,
   /// applying the same name search the server would. There's no

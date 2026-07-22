@@ -1,11 +1,12 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
+import 'package:ncw_fireworks/core/utils/pdf/quotation_pdf_builder.dart';
 import 'package:ncw_fireworks/core/utils/pdf_downloader.dart';
-import 'package:url_launcher/url_launcher.dart';
-import '../../core/constants/api_endpoints.dart';
+import 'package:printing/printing.dart';
 import '../../core/network/api_exception.dart';
 import '../../core/services/session_service.dart';
 import '../../core/utils/id_generator.dart';
@@ -14,6 +15,7 @@ import '../../data/models/party_model.dart';
 import '../../data/models/quotation/id_name.dart';
 import '../../data/models/quotation/quotation_product_list_response_model.dart';
 import '../../data/models/quotation_model.dart';
+import '../../data/respositories/party_repository.dart';
 import '../../data/respositories/quotation_repository.dart';
 import '../../routes/app_routes.dart';
 import '../estimation/estimation_controller.dart';
@@ -42,11 +44,14 @@ class QuotationController extends GetxController {
   QuotationController({
     QuotationRepository? quotationRepository,
     SessionService? sessionService,
+    PartyRepository? partyRepository,
   })  : _quotationRepository = quotationRepository ?? QuotationRepository(),
-        _sessionService = sessionService ?? Get.find<SessionService>();
+        _sessionService = sessionService ?? Get.find<SessionService>(),
+        _partyRepository = partyRepository ?? PartyRepository();
 
   final QuotationRepository _quotationRepository;
   final SessionService _sessionService;
+  final PartyRepository _partyRepository;
 
   static final DateFormat _apiDateFormat = DateFormat('dd-MM-yyyy');
   static final DateFormat _serverStoredDateFormat = DateFormat('yyyy-MM-dd');
@@ -469,46 +474,43 @@ class QuotationController extends GetxController {
 
   // ---- Print / download report PDF ----------------------------------------
 
-  /// Opens the A4 quotation report PDF in the device's browser/PDF viewer.
-  /// Print and download both point at the same report — the viewer's own
-  /// print/save controls handle each action from there.
-  Future<void> _openQuotationReport(QuotationModel quotation) async {
-    final id = quotation.serverQuotationId ?? quotation.id;
-    if (id.isEmpty) {
-      Get.snackbar('Not available', 'This quotation has no report yet',
-          snackPosition: SnackPosition.BOTTOM);
-      return;
-    }
-    final uri = ApiEndpoints.quotationReport(id);
-    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!opened) {
-      Get.snackbar('Could not open', 'Unable to open the quotation report',
+  /// Builds the A4 quotation PDF entirely on-device (see
+  /// [QuotationPdfBuilder]) — no network call, so this works the same
+  /// whether or not the device is online, and whether or not this
+  /// quotation has even been synced yet.
+  Future<Uint8List> _buildQuotationPdfBytes(QuotationModel quotation) {
+    final party = _partyRepository.cachedPartyById(quotation.partyId);
+    return QuotationPdfBuilder.build(quotation: quotation, party: party);
+  }
+
+  /// Opens the native print/preview dialog for [quotation]'s A4 report.
+  Future<void> printQuotation(QuotationModel quotation) async {
+    try {
+      final bytes = await _buildQuotationPdfBytes(quotation);
+      await Printing.layoutPdf(onLayout: (_) async => bytes);
+    } catch (_) {
+      Get.snackbar('Could not print', 'Unable to generate the quotation report',
           snackPosition: SnackPosition.BOTTOM);
     }
   }
-
-  Future<void> printQuotation(QuotationModel quotation) =>
-      _openQuotationReport(quotation);
 
   Future<void> downloadQuotation(QuotationModel quotation) async {
-  final id = quotation.serverQuotationId ?? quotation.id;
-  if (id.isEmpty) {
-    Get.snackbar('Not available', 'This quotation has no report yet',
-        snackPosition: SnackPosition.BOTTOM);
-    return;
+    try {
+      final bytes = await _buildQuotationPdfBytes(quotation);
+      await PdfDownloader.saveBytes(
+        bytes: bytes,
+        fileName: quotation.quotationNo.isEmpty
+            ? 'Quotation'
+            : quotation.quotationNo,
+      );
+      Get.snackbar('Downloaded', 'Quotation report saved',
+          snackPosition: SnackPosition.BOTTOM);
+    } catch (_) {
+      Get.snackbar('Could not download',
+          'Unable to generate the quotation report',
+          snackPosition: SnackPosition.BOTTOM);
+    }
   }
-  try {
-    await PdfDownloader.download(
-      uri: ApiEndpoints.quotationReport(id),
-      fileName: quotation.quotationNo,
-    );
-    Get.snackbar('Downloaded', 'Quotation report saved',
-        snackPosition: SnackPosition.BOTTOM);
-  } catch (e) {
-    Get.snackbar('Could not download', 'Unable to download the quotation report',
-        snackPosition: SnackPosition.BOTTOM);
-  }
-}
 
   // ---- Convert to Estimate --------------------------------------------------
 
