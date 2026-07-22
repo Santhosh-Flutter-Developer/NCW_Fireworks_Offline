@@ -25,7 +25,15 @@ class PartyListView extends GetView<PartyController> {
         title: 'Party',
         actions: [
           SyncActionButton(
-            onSync: Get.find<DataSyncService>().syncParty,
+            // syncParty() only pushes/pulls the cache — it doesn't touch
+            // this screen's `parties` list, so without reloading here the
+            // "Pending sync" badges would just sit there until something
+            // else (search, pagination, re-entering the page) happened to
+            // call loadParties() next.
+            onSync: () async {
+              await Get.find<DataSyncService>().syncParty();
+              await controller.loadParties();
+            },
           ),
         ],
         body: Padding(
