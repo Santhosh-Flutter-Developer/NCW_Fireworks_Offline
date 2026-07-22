@@ -1,21 +1,30 @@
 /// The locally persisted "logged in" session. Deliberately holds only
-/// what the login API actually gives us (`user_id`, `name`) plus a
-/// timestamp — no password or other sensitive material is ever stored.
+/// what the login API actually gives us (`user_id`, `name`, `bill_prefix`)
+/// plus a timestamp — no password or other sensitive material is ever
+/// stored.
 class AuthSessionModel {
   final String userId;
   final String name;
   final DateTime loggedInAt;
 
+  /// This business's short document-number prefix (e.g. `AKB`) — used to
+  /// build `quotation_number` client-side (`AKBQUT006/26-27`) now that
+  /// the server no longer generates it. Empty for a session restored
+  /// from before this field existed, or if the server hasn't set one.
+  final String billPrefix;
+
   const AuthSessionModel({
     required this.userId,
     required this.name,
     required this.loggedInAt,
+    this.billPrefix = '',
   });
 
   Map<String, dynamic> toJson() => {
         'user_id': userId,
         'name': name,
         'logged_in_at': loggedInAt.toIso8601String(),
+        'bill_prefix': billPrefix,
       };
 
   factory AuthSessionModel.fromJson(Map<String, dynamic> json) {
@@ -30,6 +39,9 @@ class AuthSessionModel {
       loggedInAt:
           DateTime.tryParse(json['logged_in_at'] as String? ?? '') ??
               DateTime.now(),
+      // Missing entirely for a session saved before this field was
+      // added — defaults to empty rather than failing to restore.
+      billPrefix: json['bill_prefix']?.toString() ?? '',
     );
   }
 

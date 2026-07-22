@@ -113,15 +113,22 @@ class QuotationRepository {
   /// currently has internet. [localId] identifies the queue entry:
   /// saving under the same [localId] again (e.g. editing a not-yet-
   /// synced row a second time before syncing) replaces its previous
-  /// entry instead of adding a duplicate. [editId] is the real server
-  /// `quotation_id` when this is an edit of an already-synced quotation,
-  /// or empty for a brand-new one. [products] carries more than the wire
-  /// format needs (name/unit alongside id/qty/rate) so a pending row can
-  /// be re-opened for editing without a server round trip — only
+  /// entry instead of adding a duplicate.
+  ///
+  /// [editId] and [quotationNumber] are now both generated on this
+  /// device (see `QuotationController.save` / [nextQuotationNumber]) —
+  /// the server no longer assigns either; it just stores whatever unique
+  /// `edit_id` and `quotation_number` it's given. For a brand-new
+  /// quotation both are freshly generated; for an edit, both must be the
+  /// same values the quotation already has, so editing never changes its
+  /// id or bill number. [products] carries more than the wire format
+  /// needs (name/unit alongside id/qty/rate) so a pending row can be
+  /// re-opened for editing without a server round trip — only
   /// id/qty/rate are actually sent once [syncPendingQuotations] runs.
   Future<void> queueQuotationForSync({
     required String localId,
-    String editId = '',
+    required String editId,
+    required String quotationNumber,
     required String drafted,
     required String quotationDate, // dd-MM-yyyy
     required String pricelistId,
@@ -139,6 +146,7 @@ class QuotationRepository {
     final row = <String, dynamic>{
       'local_id': localId,
       'edit_id': editId,
+      'quotation_number': quotationNumber,
       'drafted': drafted,
       // Cancel stays a separate, live-only action (deleteQuotation) —
       // nothing queued here is ever cancelled.
@@ -178,6 +186,46 @@ class QuotationRepository {
   int get pendingQuotationCount =>
       _cache.getJsonList(CacheKeys.quotationPending).length;
 
+  /// The `YY-YY` financial-year suffix `quotation_number` gets appended
+  /// with (e.g. `26-27` for a date in April 2026 – March 2027) — the
+  /// same Indian financial year the business already prints on its bills.
+  static String _financialYearSuffix(DateTime date) {
+    final startYear = date.month >= 4 ? date.year : date.year - 1;
+    String two(int y) => (y % 100).toString().padLeft(2, '0');
+    return '${two(startYear)}-${two(startYear + 1)}';
+  }
+
+  /// Builds the next `quotation_number` for a brand-new quotation:
+  /// `<billPrefix>QUT<seq>/<FY>` — e.g. `AKBQUT006/26-27`. The sequence
+  /// carries on from the highest number already used this financial
+  /// year, across every cached tab (Active/Draft/Cancel) and anything
+  /// still pending sync, so numbers stay sequential across multiple
+  /// offline creates even before a Sync.
+  String nextQuotationNumber({required String billPrefix}) {
+    final fy = _financialYearSuffix(DateTime.now());
+    final pattern = RegExp('QUT(\\d+)/${RegExp.escape(fy)}\$');
+
+    var maxSeq = 0;
+    void scan(Iterable<Map<String, dynamic>> rows) {
+      for (final row in rows) {
+        final number = row['quotation_number']?.toString() ?? '';
+        final match = pattern.firstMatch(number);
+        if (match != null) {
+          final seq = int.tryParse(match.group(1)!) ?? 0;
+          if (seq > maxSeq) maxSeq = seq;
+        }
+      }
+    }
+
+    scan(_cache.getJsonList(CacheKeys.quotationActive));
+    scan(_cache.getJsonList(CacheKeys.quotationDraft));
+    scan(_cache.getJsonList(CacheKeys.quotationCancel));
+    scan(_cache.getJsonList(CacheKeys.quotationPending));
+
+    final next = (maxSeq + 1).toString().padLeft(3, '0');
+    return '${billPrefix}QUT$next/$fy';
+  }
+
   /// Sends every queued add/edit to `quotation.php` in a single batch
   /// call — the same `quotation_update` / `quotation_data: [...]` shape
   /// the endpoint expects for multiple rows at once. Only ever called
@@ -213,6 +261,7 @@ class QuotationRepository {
       ];
       return {
         'edit_id': row['edit_id'] ?? '',
+        'quotation_number': row['quotation_number'] ?? '',
         'drafted': row['drafted'] ?? '0',
         'cancelled': row['cancelled'] ?? '0',
         'quotation_date': row['quotation_date'] ?? '',

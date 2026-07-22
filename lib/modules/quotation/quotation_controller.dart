@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/constants/api_endpoints.dart';
 import '../../core/network/api_exception.dart';
 import '../../core/services/session_service.dart';
+import '../../core/utils/id_generator.dart';
 import '../../data/models/billing_item_model.dart';
 import '../../data/models/party_model.dart';
 import '../../data/models/quotation/id_name.dart';
@@ -913,22 +914,39 @@ class QuotationController extends GetxController {
 
     isSaving.value = true;
     try {
-      // A pending (not-yet-synced) row keeps its own queue-entry id so
-      // re-editing it before syncing replaces that entry rather than
-      // adding a second one. A row already confirmed on the server uses
-      // its real quotation_id as the edit_id so the batch sync updates
-      // it in place instead of creating a duplicate. A brand-new
-      // quotation gets a fresh local id and an empty edit_id.
-      final localId = editingQuotation == null
-          ? _newLocalId()
-          : (editingQuotation!.localId ??
-              editingQuotation!.serverQuotationId ??
-              _newLocalId());
-      final editId = editingQuotation?.serverQuotationId ?? '';
+      // The server no longer assigns `quotation_id`/`quotation_number`
+      // itself — the client generates both, once, at creation:
+      // `editId` becomes the quotation's permanent id (used for every
+      // later edit and for Convert to Estimate), and `quotationNumber`
+      // is the printed bill number. An edit reuses both unchanged —
+      // regenerating either here would silently rename an existing
+      // quotation.
+      final String editId;
+      final String quotationNumber;
+      if (editingQuotation == null) {
+        editId = IdGenerator.generate();
+        quotationNumber = _quotationRepository.nextQuotationNumber(
+          billPrefix: session.billPrefix,
+        );
+      } else {
+        editId = editingQuotation!.serverQuotationId ??
+            editingQuotation!.localId ??
+            IdGenerator.generate();
+        quotationNumber = editingQuotation!.quotationNo.isNotEmpty
+            ? editingQuotation!.quotationNo
+            : _quotationRepository.nextQuotationNumber(
+                billPrefix: session.billPrefix,
+              );
+      }
+      // The id doubles as the pending-queue entry's key — since it's
+      // assigned once at creation and never changes, there's no separate
+      // "local-only" id to track the way Party's queue still needs one.
+      final localId = editId;
 
       await _quotationRepository.queueQuotationForSync(
         localId: localId,
         editId: editId,
+        quotationNumber: quotationNumber,
         drafted: asDraft ? '1' : '0',
         quotationDate: _apiDateFormat.format(quotationDate.value),
         pricelistId: selectedPricelistId.value ?? '',
@@ -980,6 +998,4 @@ class QuotationController extends GetxController {
     }
   }
 
-  /// A short, unique-enough id for a brand-new pending-queue entry.
-  String _newLocalId() => 'LOCAL-${DateTime.now().microsecondsSinceEpoch}';
 }

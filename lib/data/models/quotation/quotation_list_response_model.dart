@@ -102,9 +102,10 @@ class QuotationListItem {
 
   /// Builds a row from one entry of the pending-sync queue (the same
   /// shape [QuotationRepository.queueQuotationForSync] writes).
-  /// [quotationId] here is the row's `edit_id` — empty for a brand-new
-  /// quotation not yet on the server, or the real server id when this is
-  /// a queued edit of an already-synced quotation.
+  /// [quotationId] here is the row's `edit_id` — the client generates
+  /// this (and `quotation_number`) itself now, at creation time, so it's
+  /// always populated, even for a quotation not yet sent to the server
+  /// (see `QuotationController.save`).
   factory QuotationListItem.fromPendingRow(Map<String, dynamic> row) {
     final rawProducts = row['product_data'];
     final products = <QuotationDetailProductRow>[
@@ -125,7 +126,7 @@ class QuotationListItem {
 
     return QuotationListItem(
       quotationId: row['edit_id']?.toString() ?? '',
-      quotationNumber: '', // No bill number until the server confirms it.
+      quotationNumber: row['quotation_number']?.toString() ?? '',
       quotationDate: row['quotation_date']?.toString() ?? '',
       partyNameMobileCity: row['party_name']?.toString() ?? '',
       totalQuantity: products

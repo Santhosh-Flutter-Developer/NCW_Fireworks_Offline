@@ -10,7 +10,8 @@ import '../../../core/network/api_exception.dart';
 ///     "code": 200,
 ///     "msg": "Login Successfully",
 ///     "user_id": "<opaque session/user identifier>",
-///     "name": "NCW Fireworks Retail (1234567890)"
+///     "name": "NCW Fireworks Retail (1234567890)",
+///     "bill_prefix": "AKB"
 ///   }
 /// }
 /// ```
@@ -25,11 +26,19 @@ class LoginResponseModel {
   final String? userId;
   final String? name;
 
+  /// This business's short prefix for document numbers it generates on
+  /// this device (e.g. `AKB` in `AKBQUT006/26-27`) — quotations are the
+  /// first document type to need it, since `quotation_number` is now
+  /// generated client-side instead of by the server. Empty when the
+  /// server hasn't set one for this account.
+  final String billPrefix;
+
   const LoginResponseModel({
     required this.code,
     required this.message,
     this.userId,
     this.name,
+    this.billPrefix = '',
   });
 
   /// True only when the server both reports success AND gave us a usable
@@ -68,6 +77,7 @@ class LoginResponseModel {
       name: (rawName is String && rawName.trim().isNotEmpty)
           ? rawName.trim()
           : null,
+      billPrefix: head['bill_prefix']?.toString().trim() ?? '',
     );
   }
 }

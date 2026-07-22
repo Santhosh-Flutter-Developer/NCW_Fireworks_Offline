@@ -122,6 +122,7 @@ class LoginController extends GetxController {
         userId: result.userId!,
         name: result.name ?? username,
         loggedInAt: DateTime.now(),
+        billPrefix: result.billPrefix,
       );
       await _sessionService.saveSession(session);
 
@@ -134,6 +135,7 @@ class LoginController extends GetxController {
         password: password,
         userId: session.userId,
         name: session.name,
+        billPrefix: session.billPrefix,
       );
 
       passwordCtrl.clear();
@@ -191,6 +193,7 @@ class LoginController extends GetxController {
         userId: credential.userId,
         name: credential.name,
         loggedInAt: DateTime.now(),
+        billPrefix: credential.billPrefix,
       ),
     );
 

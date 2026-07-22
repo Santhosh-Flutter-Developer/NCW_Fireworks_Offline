@@ -12,10 +12,16 @@ class OfflineCredential {
   final String userId;
   final String name;
 
+  /// Same document-number prefix as [AuthSessionModel.billPrefix] —
+  /// carried here too so it survives an *offline* login, not just an
+  /// online one.
+  final String billPrefix;
+
   const OfflineCredential({
     required this.username,
     required this.userId,
     required this.name,
+    this.billPrefix = '',
   });
 }
 
@@ -48,6 +54,7 @@ class OfflineCredentialService extends GetxService {
     required String password,
     required String userId,
     required String name,
+    String billPrefix = '',
   }) async {
     final salt = _generateSalt();
     final payload = {
@@ -56,6 +63,7 @@ class OfflineCredentialService extends GetxService {
       'hash': _hash(password, salt),
       'user_id': userId,
       'name': name,
+      'bill_prefix': billPrefix,
     };
     await _storage.write(key: _key, value: jsonEncode(payload));
   }
@@ -90,6 +98,7 @@ class OfflineCredentialService extends GetxService {
         username: storedUsername,
         userId: decoded['user_id']?.toString() ?? '',
         name: decoded['name']?.toString() ?? '',
+        billPrefix: decoded['bill_prefix']?.toString() ?? '',
       );
     } catch (_) {
       return null;
