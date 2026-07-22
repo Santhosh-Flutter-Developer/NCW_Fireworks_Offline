@@ -83,6 +83,137 @@ class PartyRepository {
     throw ApiRequestException(result.message);
   }
 
+  /// Adds or updates one row in the on-device "pending party changes"
+  /// queue ([CacheKeys.partyPending]). Every add/edit from the Party form
+  /// goes through this — never a direct call to `party.php` — regardless
+  /// of whether the device currently has internet. [localId] identifies
+  /// the queue entry: saving under the same [localId] again (e.g.
+  /// editing a not-yet-synced row a second time before syncing) replaces
+  /// its previous entry instead of adding a duplicate. [editId] is the
+  /// real server `party_id` when this is an edit of an already-synced
+  /// party, or empty for a brand-new party.
+  Future<void> queuePartyForSync({
+    required String localId,
+    String editId = '',
+    required String partyName,
+    String agentId = '',
+    String mobileNumber = '',
+    String email = '',
+    String identification = '',
+    String address = '',
+    required String state,
+    String district = '',
+    String city = '',
+    String othersCity = '',
+    String pincode = '',
+    String gstNumber = '',
+    String openingBalance = '',
+    String openingBalanceType = '',
+  }) async {
+    final pending = _cache.getJsonList(CacheKeys.partyPending);
+    final row = <String, dynamic>{
+      'local_id': localId,
+      'edit_id': editId,
+      'party_name': partyName,
+      'agent_id': agentId,
+      'mobile_number': mobileNumber,
+      'email': email,
+      'identification': identification,
+      'address': address,
+      'state': state,
+      'district': district,
+      'city': city,
+      'others_city': othersCity,
+      'pincode': pincode,
+      'gst_number': gstNumber,
+      'opening_balance': openingBalance,
+      'opening_balance_type': openingBalanceType,
+    };
+    final updated = [
+      ...pending.where((p) => p['local_id'] != localId),
+      row,
+    ];
+    await _cache.putJsonList(CacheKeys.partyPending, updated);
+  }
+
+  /// Removes one entry from the pending-sync queue by [localId] — used
+  /// when the user deletes a row from the list before it's ever synced,
+  /// so it doesn't reappear on the next reload.
+  Future<void> removePendingParty(String localId) async {
+    final pending = _cache.getJsonList(CacheKeys.partyPending);
+    await _cache.putJsonList(
+      CacheKeys.partyPending,
+      pending.where((p) => p['local_id'] != localId).toList(),
+    );
+  }
+
+  /// Number of party adds/edits saved on this device that haven't been
+  /// sent to the server yet.
+  int get pendingPartyCount =>
+      _cache.getJsonList(CacheKeys.partyPending).length;
+
+  /// Sends every queued add/edit to `party.php` in a single batch call —
+  /// the same `party_update` / `party_data: [...]` shape the endpoint
+  /// expects for multiple rows at once. Only ever called from the Sync
+  /// button (via [DataSyncService]), and only while online — nothing
+  /// else in the app ever calls this.
+  ///
+  /// On success, clears the queue. On failure (network error, or a
+  /// business-rule rejection like a duplicate name), the queue is left
+  /// untouched so nothing saved on the device is lost — the next Sync
+  /// attempt retries the same batch.
+  Future<PartySaveResponseModel> syncPendingParties({
+    required String creator,
+  }) async {
+    final pending = _cache.getJsonList(CacheKeys.partyPending);
+    if (pending.isEmpty) {
+      return const PartySaveResponseModel(
+        code: 200,
+        message: 'Nothing to sync',
+      );
+    }
+
+    final partyData = pending
+        .map((row) => {
+              'edit_id': row['edit_id'] ?? '',
+              'party_name': row['party_name'] ?? '',
+              'agent_id': row['agent_id'] ?? '',
+              'mobile_number': row['mobile_number'] ?? '',
+              'email': row['email'] ?? '',
+              'identification': row['identification'] ?? '',
+              'address': row['address'] ?? '',
+              'state': row['state'] ?? '',
+              'district': row['district'] ?? '',
+              'city': row['city'] ?? '',
+              'others_city': row['others_city'] ?? '',
+              'pincode': row['pincode'] ?? '',
+              'gst_number': row['gst_number'] ?? '',
+              'opening_balance': row['opening_balance'] ?? '',
+              'opening_balance_type': row['opening_balance_type'] ?? '',
+            })
+        .toList();
+
+    final json = await _apiClient.postJson(
+      ApiEndpoints.party,
+      body: {
+        'party_update': '1',
+        'creator': creator,
+        'party_data': partyData,
+      },
+    );
+
+    final result = PartySaveResponseModel.fromJson(json);
+    if (!result.isSuccess) {
+      throw ApiRequestException(result.message);
+    }
+
+    // The batch is confirmed on the server now — clear the queue so it
+    // isn't sent again. The synced-cache refresh (fetchLiveParties) that
+    // follows this is DataSyncService's job, not this repository's.
+    await _cache.putJsonList(CacheKeys.partyPending, []);
+    return result;
+  }
+
   /// Returns a page of the party list — always from the offline cache
   /// that [DataSyncService]/the Sync button populate, regardless of
   /// whether the device currently has internet.
@@ -140,6 +271,7 @@ class PartyRepository {
   }
 
   /// Builds a page of results from whatever [DataSyncService] last cached,
+  /// merged with anything still sitting in the pending-sync queue,
   /// applying the same name search the server would. There's no
   /// agent-id field on the cached rows (the list endpoint never returns
   /// one), so an [agentId] filter can't be honored offline — matches
@@ -149,10 +281,26 @@ class PartyRepository {
     required int? pageNumber,
     required int? pageLimit,
   }) {
-    final all = _cache
+    final pendingItems = _cache
+        .getJsonList(CacheKeys.partyPending)
+        .map(PartyListItem.fromPendingRow)
+        .toList();
+
+    // A pending edit of an already-synced party (non-empty edit_id)
+    // supersedes that party's stale synced-cache row — otherwise the
+    // list would show both the old and the not-yet-synced new version.
+    final supersededIds =
+        pendingItems.map((p) => p.partyId).where((id) => id.isNotEmpty).toSet();
+
+    final synced = _cache
         .getJsonList(CacheKeys.party)
         .map(PartyListItem.fromJson)
+        .where((p) => !supersededIds.contains(p.partyId))
         .toList();
+
+    // Newest pending entries first (most recent add/edit on top), then
+    // the synced rows in their existing (already newest-first) order.
+    final all = [...pendingItems.reversed, ...synced];
 
     final filtered = all
         .where((p) => matchesSearch(searchText, [p.partyName]))

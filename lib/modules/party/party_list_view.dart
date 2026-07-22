@@ -403,6 +403,23 @@ class _PartyTile extends StatelessWidget {
                               ),
                             ),
                           ),
+                        if (party.isPending)
+                          Container(
+                            margin: const EdgeInsets.only(left: 6),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: AppColors.skyBlue.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              'Pending sync',
+                              style: AppTextStyles.caption.copyWith(
+                                color: AppColors.skyBlue,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
                       ],
                     ),
                     const SizedBox(height: 3),

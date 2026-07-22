@@ -30,6 +30,16 @@ class PartyModel {
   bool isDraft;
    bool hasFullDetails;
 
+  /// True when this row was built from the on-device pending-sync queue
+  /// — an add/edit made on this device that hasn't been sent to
+  /// `party.php` yet. Drives the "Pending sync" badge on the list.
+  bool isPending;
+
+  /// The pending-sync queue entry's own id, when [isPending] is true —
+  /// used to update/remove that exact entry on a later edit or delete.
+  /// Null for a row that came from the synced server cache.
+  String? localId;
+
   PartyModel({
     required this.id,
     this.serverPartyId,
@@ -49,6 +59,8 @@ class PartyModel {
     this.balanceType = BalanceType.credit,
     this.isDraft = false,
     this.hasFullDetails = true,
+    this.isPending = false,
+    this.localId,
   });
 
   String get initials {

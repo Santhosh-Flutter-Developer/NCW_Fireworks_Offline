@@ -9,6 +9,7 @@ import '../../data/respositories/quotation_repository.dart';
 import '../../data/respositories/receipt_repository.dart';
 import 'cache_keys.dart';
 import 'local_cache_service.dart';
+import 'session_service.dart';
 
 /// Pulls the Party / Price Upload / Quotation / Estimation / Receipt
 /// lists down from the API and caches them locally.
@@ -50,13 +51,15 @@ class DataSyncService extends GetxService {
     EstimateRepository? estimateRepository,
     ReceiptRepository? receiptRepository,
     LocalCacheService? cache,
+    SessionService? sessionService,
   })  : _partyRepository = partyRepository ?? PartyRepository(),
         _productPriceRepository =
             productPriceRepository ?? ProductPriceRepository(),
         _quotationRepository = quotationRepository ?? QuotationRepository(),
         _estimateRepository = estimateRepository ?? EstimateRepository(),
         _receiptRepository = receiptRepository ?? ReceiptRepository(),
-        _cache = cache ?? Get.find<LocalCacheService>();
+        _cache = cache ?? Get.find<LocalCacheService>(),
+        _sessionService = sessionService ?? Get.find<SessionService>();
 
   final PartyRepository _partyRepository;
   final ProductPriceRepository _productPriceRepository;
@@ -64,6 +67,7 @@ class DataSyncService extends GetxService {
   final EstimateRepository _estimateRepository;
   final ReceiptRepository _receiptRepository;
   final LocalCacheService _cache;
+  final SessionService _sessionService;
 
   final isSyncing = false.obs;
   final statusMessage = ''.obs;
@@ -158,14 +162,45 @@ class DataSyncService extends GetxService {
     statusMessage.value = message;
   }
 
+  /// Pushes anything in the pending-sync queue to `party.php` in one
+  /// batch first — this is what the Sync button actually triggers per
+  /// the offline-first design: queued adds/edits go out, and only once
+  /// that succeeds (or there was nothing queued) does the party list get
+  /// re-pulled and re-cached. If the push fails (network error, or a
+  /// business-rule rejection such as a duplicate name), this throws and
+  /// the pull below never runs — [_runStep] catches it, and the queue is
+  /// left intact for the next Sync attempt.
   Future<void> _syncParties() async {
     _announce('Syncing parties');
+    final creator = _sessionService.currentSession.value?.userId;
+    if (creator != null && creator.isNotEmpty) {
+      await _partyRepository.syncPendingParties(creator: creator);
+    }
+
     final result = await _partyRepository.fetchLiveParties();
+    // Cache every field `party_listing` gives us (not just id/name/state)
+    // so editing a synced party later works entirely offline — see the
+    // `_full` marker in `PartyListItem.fromJson`.
     final items = result.items
         .map((p) => {
               'party_id': p.partyId,
               'party_name': p.partyName,
               'state': p.state,
+              'agent_id': p.agentId,
+              'agent_name': p.agentName,
+              'mobile_number': p.mobileNumber,
+              'email': p.email,
+              'identification': p.identification,
+              'address': p.address,
+              'district': p.district,
+              'city': p.city,
+              'others_city': p.othersCity,
+              'pincode': p.pincode,
+              'gst_number': p.gstNumber,
+              'opening_balance': p.openingBalance,
+              'opening_balance_type': p.openingBalanceType,
+              'draft': p.isDraft ? '1' : '0',
+              '_full': true,
             })
         .toList();
     await _cache.putJsonList(CacheKeys.party, items);

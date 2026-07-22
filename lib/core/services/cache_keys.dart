@@ -7,6 +7,13 @@ class CacheKeys {
 
   static const party = 'party_list';
 
+  /// Queue of Party adds/edits made on this device that haven't been sent
+  /// to `party.php` yet. Every save from the Party form — create or edit,
+  /// online or offline — lands here first; only a manual tap of the Sync
+  /// button ever drains it (see [PartyRepository.queuePartyForSync] /
+  /// [PartyRepository.syncPendingParties]).
+  static const partyPending = 'party_pending';
+
   static const priceRows = 'price_list_rows';
   static const priceLists = 'price_list_options';
   static const priceProducts = 'price_list_products';

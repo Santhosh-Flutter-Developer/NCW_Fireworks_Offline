@@ -124,16 +124,36 @@ class PartyController extends GetxController {
         pageLimit: pageLimit.value,
       );
 
-      parties.assignAll(result.items.map((item) => PartyModel(
-            id: item.partyId,
-            serverPartyId: item.partyId,
-            name: item.partyName.isEmpty ? 'Untitled Party' : item.partyName,
-            state: item.state,
-            // The list endpoint only returns id/name/state — every other
-            // field is unknown, so this row can't be safely re-saved
-            // without a get-by-id endpoint to fill in the rest first.
-            hasFullDetails: false,
-          )));
+      parties.assignAll(result.items.map((item) {
+        final knownFullDetails = item.isPending || item.hasFullDetails;
+        return PartyModel(
+          id: item.isPending ? item.localId : item.partyId,
+          serverPartyId: item.partyId.isEmpty ? null : item.partyId,
+          agent: item.agentName,
+          name: item.partyName.isEmpty ? 'Untitled Party' : item.partyName,
+          phone: item.mobileNumber,
+          email: item.email,
+          address: item.address,
+          state: item.state,
+          district: item.district,
+          city: item.city,
+          othersCity: item.othersCity,
+          pincode: item.pincode,
+          identification: item.identification,
+          gstin: item.gstNumber,
+          openingBalance: double.tryParse(item.openingBalance) ?? 0,
+          balanceType: item.openingBalanceType == '2'
+              ? BalanceType.debit
+              : BalanceType.credit,
+          isDraft: item.isDraft,
+          isPending: item.isPending,
+          localId: item.isPending ? item.localId : null,
+          // A row cached by an older build of this app only has
+          // id/name/state — not safe to re-save without fetching the
+          // rest first (see PartyController.startEdit).
+          hasFullDetails: knownFullDetails,
+        );
+      }));
 
       if (result.totalPages != null) {
         totalPagesRx.value = result.totalPages!.clamp(1, 1 << 30);
@@ -219,8 +239,19 @@ class PartyController extends GetxController {
     addressCtrl.text = party.address;
     formState.value = party.state.isEmpty ? 'Tamil Nadu' : party.state;
     formDistrict.value = party.district.isEmpty ? null : party.district;
-    formCity.value = party.city.isEmpty ? null : party.city;
-    othersCityCtrl.text = party.othersCity;
+    final knownCities = cityOptions(formState.value);
+    if (party.city.isNotEmpty &&
+        party.othersCity.isEmpty &&
+        !knownCities.contains(party.city)) {
+      // The server only ever stores the resolved city text, not whether
+      // it originally came from "Others" — a value outside the known
+      // list means that's what happened, so re-derive it here.
+      formCity.value = 'Others';
+      othersCityCtrl.text = party.city;
+    } else {
+      formCity.value = party.city.isEmpty ? null : party.city;
+      othersCityCtrl.text = party.othersCity;
+    }
     pincodeCtrl.text = party.pincode;
     identificationCtrl.text = party.identification;
     gstinCtrl.text = party.gstin;
@@ -229,12 +260,14 @@ class PartyController extends GetxController {
     formBalanceType.value = party.balanceType;
   }
 
-  /// Opens the Edit form for [party]. If we already know every field
-  /// (created this session, or bundled demo data) this just populates
-  /// the form directly. Rows that came from the party list endpoint
-  /// only have id/name/state, so this fetches the rest via
-  /// `show_party_id` first — editing without that would otherwise blank
-  /// out every other field the next time it's saved.
+  /// Opens the Edit form for [party]. The offline cache now carries every
+  /// field `party_listing` returns (see `DataSyncService`/`PartyListItem`),
+  /// and every pending (not-yet-synced) row is fully known too — so this
+  /// populates the form directly and works with no network call at all in
+  /// the normal case. The `show_party_id` fetch below only ever runs for
+  /// a row cached by an older build of this app (before full details were
+  /// stored) that hasn't been refreshed by a sync yet; it's a one-time
+  /// fallback, not something the offline-first flow depends on.
   Future<void> startEdit(PartyModel party) async {
     if (party.hasFullDetails || party.serverPartyId == null) {
       editingParty = party;
@@ -328,6 +361,13 @@ class PartyController extends GetxController {
     BalanceType.debit: '2',
   };
 
+  /// Saves the form. This is offline-only, always — a Draft or a regular
+  /// Submit/Update both save straight to this device and never call
+  /// `party.php` directly, whether or not the internet happens to be
+  /// available right now. A regular (non-draft) save is queued in
+  /// [CacheKeys.partyPending] via [PartyRepository.queuePartyForSync];
+  /// only a manual tap of the Sync button (see [DataSyncService]) ever
+  /// sends that queue to the server, in one batch.
   Future<bool> save({bool asDraft = false}) async {
     if (isSaving.value) return false;
 
@@ -355,10 +395,10 @@ class PartyController extends GetxController {
         ? 'Untitled Party'
         : nameCtrl.text.trim();
 
-    // party.php always requires party_name (and validates it against
-    // existing records) and has no real "draft" flag in the payload it
-    // accepts — a Draft save (which may have an empty/incomplete name)
-    // can't be safely sent there, so drafts stay local-only for now.
+    // party.php has no real "draft" flag in the payload it accepts, and
+    // a Draft may have an empty/incomplete name — so a Draft never goes
+    // into the sync queue at all; it just lives in the in-memory list on
+    // this device until turned into a real save.
     if (asDraft) {
       _applyLocally(asDraft: true, balance: balance, name: name);
       Get.back();
@@ -367,34 +407,23 @@ class PartyController extends GetxController {
       return true;
     }
 
-    // Editing a row we never got a real party_id for (e.g. the bundled
-    // demo rows, or a row created before the API returned one) can't be
-    // sent to party.php — there is nothing for the server to match
-    // against. Same for a row that came from the party list endpoint:
-    // it only has id/name/state, so sending it back would blank out
-    // every other field on the server. Both cases fall back to a
-    // local-only update.
-    final canSyncToServer = editingParty == null ||
-        (editingParty!.serverPartyId != null &&
-            editingParty!.hasFullDetails);
-
-    if (!canSyncToServer) {
-      _applyLocally(asDraft: asDraft, balance: balance, name: name);
-      Get.back();
-      Get.snackbar(
-        'Saved locally',
-        'The full details for this party aren\'t loaded from the server yet, so the change was only saved on this device.',
-        snackPosition: SnackPosition.BOTTOM,
-      );
-      return true;
-    }
-
     isSaving.value = true;
     try {
-      final result = await _partyRepository.createOrUpdateParty(
-        creator: session.userId,
+      // A pending (not-yet-synced) row keeps its own queue-entry id so
+      // re-editing it before syncing replaces that entry rather than
+      // adding a second one. A row already confirmed on the server uses
+      // its real party_id as the edit_id so the batch sync updates it in
+      // place instead of creating a duplicate. A brand-new party gets a
+      // fresh local id and an empty edit_id.
+      final localId = editingParty == null
+          ? _newLocalId()
+          : (editingParty!.localId ?? editingParty!.serverPartyId ?? _newLocalId());
+      final editId = editingParty?.serverPartyId ?? '';
+
+      await _partyRepository.queuePartyForSync(
+        localId: localId,
+        editId: editId,
         partyName: name,
-        editId: editingParty?.serverPartyId ?? '',
         agentId: '', // No agent id source is wired up — agent filter/field was removed from the UI.
         mobileNumber: phoneCtrl.text.trim(),
         email: emailCtrl.text.trim(),
@@ -404,7 +433,7 @@ class PartyController extends GetxController {
         district: formDistrict.value ?? '',
         city: formCity.value ?? '',
         othersCity:
-            formCity.value == 'Others' ? othersCityCtrl.text.trim() : null,
+            formCity.value == 'Others' ? othersCityCtrl.text.trim() : '',
         pincode: pincodeCtrl.text.trim(),
         gstNumber: gstinCtrl.text.trim().toUpperCase(),
         openingBalance: balance == 0 ? '' : balance.toString(),
@@ -414,30 +443,25 @@ class PartyController extends GetxController {
 
       final wasCreate = editingParty == null;
       Get.back();
-      Get.snackbar('Saved', result.message,
-          snackPosition: SnackPosition.BOTTOM);
-      // The server is now the source of truth for this row — reload
-      // rather than splice a locally-built copy into the page. A create
-      // jumps back to page 1 since that's the most likely place to see
-      // it (assuming newest-first ordering); an edit just re-fetches
-      // the page the user was already looking at.
+      Get.snackbar(
+        wasCreate ? 'Saved offline' : 'Updated offline',
+        'Saved on this device. Tap Sync when you\'re online to send it to the server.',
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      // Newly-queued rows show up at the top of the merged offline list
+      // regardless of page — jump back to page 1 so a create is visible
+      // right away; an edit just re-shows the page the user was on.
       if (wasCreate) pageNo.value = 1;
       await loadParties();
       return true;
-    } on ApiRequestException catch (e) {
-      // Business-rule rejection (duplicate name/mobile, invalid agent,
-      // etc.) — the server's own message is already presentable.
-      Get.snackbar('Could not save', e.message,
-          snackPosition: SnackPosition.BOTTOM);
-      return false;
-    } on ApiException catch (e) {
-      Get.snackbar('Could not save', e.message,
-          snackPosition: SnackPosition.BOTTOM);
-      return false;
     } finally {
       isSaving.value = false;
     }
   }
+
+  /// A short, unique-enough id for a brand-new pending-queue entry.
+  String _newLocalId() =>
+      'LOCAL-${DateTime.now().microsecondsSinceEpoch}';
 
   /// Mirrors the confirmed save into the in-memory list that backs the
   /// Party list screen. Runs after either a successful API call or a
@@ -492,14 +516,21 @@ class PartyController extends GetxController {
   }
 
   /// There's no delete endpoint in the API we have for party.php yet —
-  /// this only removes the row from the current in-memory page, so it
-  /// will reappear next time the list is reloaded. Flagged clearly so
-  /// it isn't mistaken for an actual server-side delete.
+  /// this only removes the row from the current in-memory page, so a
+  /// synced row will reappear next time the list is reloaded. A row
+  /// that was still only in the pending-sync queue (never sent to the
+  /// server) is fully removed instead, since there's nothing server-side
+  /// for it to reappear from.
   void deleteParty(PartyModel party) {
     parties.remove(party);
+    if (party.isPending && party.localId != null) {
+      _partyRepository.removePendingParty(party.localId!);
+    }
     Get.snackbar(
       'Removed from view',
-      '${party.name} was removed here, but there\'s no delete API yet — it\'ll reappear on refresh.',
+      party.isPending
+          ? '${party.name} was removed before it was ever synced.'
+          : '${party.name} was removed here, but there\'s no delete API yet — it\'ll reappear on refresh.',
       snackPosition: SnackPosition.BOTTOM,
     );
   }
