@@ -350,18 +350,41 @@ class QuotationController extends GetxController {
 
   void toggleViewMode(bool table) => isTableView.value = table;
 
-  /// Cancels an active quotation (server sets `cancelled = 1`) or, for a
-  /// draft row, permanently deletes it (server sets `deleted = 1`) — the
-  /// same `delete_quotation_id` call does either, decided server-side by
-  /// the quotation's own `drafted` flag.
+  /// Whether the server has ever confirmed [quotation] — false only for
+  /// one still sitting purely in the pending-sync queue, never yet sent.
+  /// A pending *edit* of an already-synced quotation still counts as
+  /// known, since cancelling it means queuing a `cancelled: "1"` update
+  /// for that existing quotation, not just dropping local state. Used by
+  /// the list view to show accurate confirm-dialog text for
+  /// [deleteQuotation].
+  bool isKnownToServer(QuotationModel quotation) {
+    final quotationId =
+        quotation.serverQuotationId ?? quotation.localId ?? quotation.id;
+    return quotationId.isNotEmpty &&
+        _quotationRepository.existsInSyncedCache(quotationId);
+  }
+
+  /// Cancels a confirmed (non-draft) quotation, or permanently deletes a
+  /// draft — mirrors the server's own `delete_quotation_id` rule based
+  /// on the quotation's `drafted` flag.
   ///
-  /// A row that's still only in the pending-sync queue (never sent to
-  /// the server) is removed from the queue instead — there's nothing on
-  /// the server yet for `delete_quotation_id` to act on, and this action
-  /// isn't part of the offline-only add/edit flow, so it still needs the
-  /// network for anything already synced.
+  /// Cancel is offline-first, just like Add/Edit: cancelling a
+  /// quotation the server already knows about queues a `cancelled: "1"`
+  /// update in the same pending-sync batch (see
+  /// [QuotationRepository.queueQuotationForSync]) and moves it to the
+  /// Cancel tab immediately — only a Sync tap actually tells the
+  /// server. Deleting a draft still needs the live
+  /// `delete_quotation_id` call (unchanged — permanent delete isn't
+  /// part of the offline Cancel flow). Either way, a quotation the
+  /// server has never confirmed (still only in the pending-sync queue)
+  /// just has its queue entry dropped — there's nothing server-side yet
+  /// to cancel or delete.
   Future<void> deleteQuotation(QuotationModel quotation) async {
-    if (quotation.isPending) {
+    final quotationId =
+        quotation.serverQuotationId ?? quotation.localId ?? quotation.id;
+    final knownToServer = isKnownToServer(quotation);
+
+    if (quotation.isPending && !knownToServer) {
       quotations.remove(quotation);
       if (quotation.localId != null) {
         await _quotationRepository.removePendingQuotation(quotation.localId!);
@@ -373,28 +396,75 @@ class QuotationController extends GetxController {
       );
       return;
     }
-    final id = quotation.serverQuotationId ?? quotation.id;
-    if (id.isEmpty) {
+
+    if (quotationId.isEmpty) {
       quotations.remove(quotation);
       return;
     }
+
     final isDraft = quotation.status == DocStatus.draft;
-    try {
-      final result =
-          await _quotationRepository.deleteQuotation(quotationId: id);
-      Get.snackbar(
-        isDraft ? 'Draft deleted' : 'Quotation cancelled',
-        result.message,
-        snackPosition: SnackPosition.BOTTOM,
-      );
-      await loadQuotations();
-    } on ApiRequestException catch (e) {
-      Get.snackbar('Could not delete', e.message,
-          snackPosition: SnackPosition.BOTTOM);
-    } on ApiException catch (e) {
-      Get.snackbar('Could not delete', e.message,
-          snackPosition: SnackPosition.BOTTOM);
+    if (isDraft) {
+      try {
+        final result = await _quotationRepository.deleteQuotation(
+            quotationId: quotationId);
+        Get.snackbar('Draft deleted', result.message,
+            snackPosition: SnackPosition.BOTTOM);
+        await loadQuotations();
+      } on ApiRequestException catch (e) {
+        Get.snackbar('Could not delete', e.message,
+            snackPosition: SnackPosition.BOTTOM);
+      } on ApiException catch (e) {
+        Get.snackbar('Could not delete', e.message,
+            snackPosition: SnackPosition.BOTTOM);
+      }
+      return;
     }
+
+    // Confirmed quotation known to the server — cancel offline. Queues
+    // the same full row a save would (so an edit already sitting in the
+    // queue, not yet synced, is updated in place rather than
+    // duplicated), just with `cancelled` added.
+    await _quotationRepository.queueQuotationForSync(
+      localId: quotationId,
+      editId: quotationId,
+      quotationNumber: quotation.quotationNo,
+      drafted: '0',
+      cancelled: true,
+      quotationDate: _apiDateFormat.format(quotation.date),
+      pricelistId: quotation.pricelistId,
+      pricelistName: quotation.pricelistName,
+      partyId: quotation.partyId,
+      partyName: quotation.partyName,
+      products: quotation.items
+          .map((i) => {
+                'product_id': i.productId,
+                'product_name': i.productName,
+                'unit_id': i.unitId,
+                'unit_name': i.unit,
+                'product_quantity': i.quantity.toString(),
+                'product_rate': i.rate.toString(),
+                'product_discount': i.section == 1 ? '1' : '0',
+              })
+          .toList(),
+      section1AddValue:
+          quotation.section1Add == 0 ? '' : quotation.section1Add.toString(),
+      section1Discount: quotation.section1Discount == 0
+          ? ''
+          : quotation.section1Discount.toString(),
+      section2AddValue:
+          quotation.section2Add == 0 ? '' : quotation.section2Add.toString(),
+      section2Discount: quotation.section2Discount == 0
+          ? ''
+          : quotation.section2Discount.toString(),
+    );
+
+    quotations.remove(quotation);
+    Get.snackbar(
+      'Cancelled offline',
+      'Will be sent to the server next time you Sync.',
+      snackPosition: SnackPosition.BOTTOM,
+    );
+    await loadQuotations();
   }
 
   // ---- Print / download report PDF ----------------------------------------

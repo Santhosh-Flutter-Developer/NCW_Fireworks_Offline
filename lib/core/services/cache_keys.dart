@@ -26,7 +26,9 @@ class CacheKeys {
   /// Queue of Quotation adds/edits made on this device that haven't been
   /// sent to `quotation.php` yet. Every save from the Quotation form —
   /// draft or confirmed, create or edit, online or offline — lands here
-  /// first; only a manual tap of the Sync button ever drains it (see
+  /// first, and so does an offline Cancel (see
+  /// `QuotationController.deleteQuotation`); only a manual tap of the
+  /// Sync button ever drains it (see
   /// [QuotationRepository.queueQuotationForSync] /
   /// [QuotationRepository.syncPendingQuotations]).
   static const quotationPending = 'quotation_pending';

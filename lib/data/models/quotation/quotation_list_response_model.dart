@@ -50,6 +50,13 @@ class QuotationListItem {
   final String section2Discount;
   final bool isDraft;
 
+  /// True when this is a pending row queuing a Cancel made while
+  /// offline (see `QuotationController.deleteQuotation` /
+  /// `QuotationRepository.queueQuotationForSync`'s `cancelled` param).
+  /// Only ever set on a pending row — a synced row's cancelled state is
+  /// which cache tab it's in, not a field on the row itself.
+  final bool isCancelled;
+
   /// Whether every field above is actually known for this row — see the
   /// class doc for when this is false.
   final bool hasFullDetails;
@@ -74,6 +81,7 @@ class QuotationListItem {
     this.section2AddValue = '',
     this.section2Discount = '',
     this.isDraft = false,
+    this.isCancelled = false,
     this.hasFullDetails = false,
   });
 
@@ -145,6 +153,7 @@ class QuotationListItem {
       section2AddValue: row['section2_add_value']?.toString() ?? '',
       section2Discount: row['section2_discount']?.toString() ?? '',
       isDraft: row['drafted']?.toString() == '1',
+      isCancelled: row['cancelled']?.toString() == '1',
       hasFullDetails: true,
     );
   }

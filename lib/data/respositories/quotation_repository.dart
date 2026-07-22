@@ -125,11 +125,17 @@ class QuotationRepository {
   /// needs (name/unit alongside id/qty/rate) so a pending row can be
   /// re-opened for editing without a server round trip — only
   /// id/qty/rate are actually sent once [syncPendingQuotations] runs.
+  /// [cancelled] defaults false for a normal add/edit save. Passing
+  /// `true` is how a Cancel made while offline is queued too (see
+  /// `QuotationController.deleteQuotation`) — the batch endpoint accepts
+  /// `cancelled: "1"` on any row, synced or not, so a Cancel is just
+  /// another entry in the same queue, not a separate call.
   Future<void> queueQuotationForSync({
     required String localId,
     required String editId,
     required String quotationNumber,
     required String drafted,
+    bool cancelled = false,
     required String quotationDate, // dd-MM-yyyy
     required String pricelistId,
     String pricelistName = '',
@@ -148,9 +154,7 @@ class QuotationRepository {
       'edit_id': editId,
       'quotation_number': quotationNumber,
       'drafted': drafted,
-      // Cancel stays a separate, live-only action (deleteQuotation) —
-      // nothing queued here is ever cancelled.
-      'cancelled': '0',
+      'cancelled': cancelled ? '1' : '0',
       'quotation_date': quotationDate,
       'pricelist_id': pricelistId,
       'pricelist_name': pricelistName,
@@ -168,6 +172,23 @@ class QuotationRepository {
       row,
     ];
     await _cache.putJsonList(CacheKeys.quotationPending, updated);
+  }
+
+  /// Whether [quotationId] already exists in one of the three synced-tab
+  /// caches (Active/Draft/Cancel) — i.e. the server has confirmed this
+  /// quotation at least once, as opposed to one still sitting only in
+  /// the pending-sync queue that's never actually been sent yet. Decides
+  /// what Cancel does for a pending row (see
+  /// `QuotationController.deleteQuotation`): queue a `cancelled: "1"`
+  /// update if the server already knows about it, or just drop the
+  /// queue entry if it doesn't.
+  bool existsInSyncedCache(String quotationId) {
+    bool inTab(String cacheKey) => _cache
+        .getJsonList(cacheKey)
+        .any((m) => m['quotation_id']?.toString() == quotationId);
+    return inTab(CacheKeys.quotationActive) ||
+        inTab(CacheKeys.quotationDraft) ||
+        inTab(CacheKeys.quotationCancel);
   }
 
   /// Removes one entry from the pending-sync queue by [localId] — used
@@ -388,13 +409,15 @@ class QuotationRepository {
         .map(QuotationListItem.fromPendingRow)
         .toList();
 
-    // A pending row only shows up under the tab matching its own
-    // drafted state — pending rows never carry `cancelled = 1`
-    // themselves (Cancel stays a live-only action via deleteQuotation),
-    // so they never appear in the Cancel tab.
-    final pendingForTab = cancelled == '1'
-        ? const <QuotationListItem>[]
-        : pendingAll.where((q) => (q.isDraft ? '1' : '0') == drafted).toList();
+    // A pending row queuing a Cancel (see
+    // `QuotationController.deleteQuotation`) always shows under the
+    // Cancel tab, regardless of its drafted flag — everything else only
+    // shows up under the tab matching its own drafted state.
+    final pendingForTab = pendingAll.where((q) {
+      if (cancelled == '1') return q.isCancelled;
+      if (q.isCancelled) return false;
+      return (q.isDraft ? '1' : '0') == drafted;
+    }).toList();
 
     // A pending edit of an already-synced quotation (non-empty edit_id)
     // supersedes that quotation's stale synced-cache row, wherever it

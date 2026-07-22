@@ -673,7 +673,7 @@ class _ActionIcons extends StatelessWidget {
             ),
           if (!isCancelled)
             IconButton(
-              tooltip: quotation.isPending
+              tooltip: !controller.isKnownToServer(quotation)
                   ? 'Remove'
                   : (isDraft ? 'Delete' : 'Cancel'),
               visualDensity: VisualDensity.compact,
@@ -687,15 +687,15 @@ class _ActionIcons extends StatelessWidget {
   }
 
   Future<void> _confirmDelete(BuildContext context, bool isDraft) async {
-    final isPending = quotation.isPending;
-    final title = isPending
+    final neverSynced = !controller.isKnownToServer(quotation);
+    final title = neverSynced
         ? 'Remove this?'
         : (isDraft ? 'Delete draft?' : 'Cancel quotation?');
-    final message = isPending
+    final message = neverSynced
         ? '${quotation.quotationNo.isEmpty ? "This quotation" : quotation.quotationNo} hasn\'t been synced yet — it will just be removed from this device.'
         : (isDraft
             ? '${quotation.quotationNo} will be permanently deleted.'
-            : '${quotation.quotationNo} will be marked as cancelled.');
+            : '${quotation.quotationNo} will be cancelled and moved to the Cancel tab — sent to the server next time you Sync.');
     final confirmed = await Get.dialog<bool>(
       AlertDialog(
         backgroundColor: AppColors.surfaceElevated,
@@ -708,7 +708,7 @@ class _ActionIcons extends StatelessWidget {
           ),
           TextButton(
             onPressed: () => Get.back(result: true),
-            child: Text(isPending ? 'Remove' : (isDraft ? 'Delete' : 'Cancel Quotation'),
+            child: Text(neverSynced ? 'Remove' : (isDraft ? 'Delete' : 'Cancel Quotation'),
                 style: TextStyle(color: AppColors.danger)),
           ),
         ],
