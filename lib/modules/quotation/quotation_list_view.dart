@@ -54,7 +54,15 @@ class _QuotationListBody extends StatelessWidget {
       title: 'Quotation',
       actions: [
         SyncActionButton(
-          onSync: Get.find<DataSyncService>().syncQuotations,
+          // syncQuotations() only pushes/pulls the cache — it doesn't
+          // touch this screen's `quotations` list, so without reloading
+          // here the "Pending sync" badges would just sit there until
+          // something else (search, tab switch, re-entering the page)
+          // happened to call loadQuotations() next.
+          onSync: () async {
+            await Get.find<DataSyncService>().syncQuotations();
+            await controller.loadQuotations();
+          },
         ),
       ],
       floatingActionButton: FloatingActionButton.extended(
@@ -480,10 +488,33 @@ class _QuotationTable extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(q.partyName,
-                    style: AppTextStyles.bodyStrong,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis),
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(q.partyName,
+                          style: AppTextStyles.bodyStrong,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis),
+                    ),
+                    if (q.isPending)
+                      Container(
+                        margin: const EdgeInsets.only(left: 6),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppColors.skyBlue.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          'Pending',
+                          style: AppTextStyles.caption.copyWith(
+                            color: AppColors.skyBlue,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
                 Text('Creator : NCW Fireworks Retail',
                     style: AppTextStyles.caption),
               ],
@@ -535,6 +566,23 @@ class _QuotationTile extends StatelessWidget {
                     child: Text(quotation.quotationNo,
                         style: AppTextStyles.bodyStrong),
                   ),
+                  if (quotation.isPending)
+                    Container(
+                      margin: const EdgeInsets.only(right: 6),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppColors.skyBlue.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        'Pending sync',
+                        style: AppTextStyles.caption.copyWith(
+                          color: AppColors.skyBlue,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
                   StatusBadge(status: quotation.status),
                 ],
               ),
@@ -625,7 +673,9 @@ class _ActionIcons extends StatelessWidget {
             ),
           if (!isCancelled)
             IconButton(
-              tooltip: isDraft ? 'Delete' : 'Cancel',
+              tooltip: quotation.isPending
+                  ? 'Remove'
+                  : (isDraft ? 'Delete' : 'Cancel'),
               visualDensity: VisualDensity.compact,
               onPressed: () => _confirmDelete(context, isDraft),
               icon: Icon(Icons.delete_outline_rounded,
@@ -637,17 +687,20 @@ class _ActionIcons extends StatelessWidget {
   }
 
   Future<void> _confirmDelete(BuildContext context, bool isDraft) async {
+    final isPending = quotation.isPending;
+    final title = isPending
+        ? 'Remove this?'
+        : (isDraft ? 'Delete draft?' : 'Cancel quotation?');
+    final message = isPending
+        ? '${quotation.quotationNo.isEmpty ? "This quotation" : quotation.quotationNo} hasn\'t been synced yet — it will just be removed from this device.'
+        : (isDraft
+            ? '${quotation.quotationNo} will be permanently deleted.'
+            : '${quotation.quotationNo} will be marked as cancelled.');
     final confirmed = await Get.dialog<bool>(
       AlertDialog(
         backgroundColor: AppColors.surfaceElevated,
-        title: Text(isDraft ? 'Delete draft?' : 'Cancel quotation?',
-            style: AppTextStyles.h3),
-        content: Text(
-          isDraft
-              ? '${quotation.quotationNo} will be permanently deleted.'
-              : '${quotation.quotationNo} will be marked as cancelled.',
-          style: AppTextStyles.body,
-        ),
+        title: Text(title, style: AppTextStyles.h3),
+        content: Text(message, style: AppTextStyles.body),
         actions: [
           TextButton(
             onPressed: () => Get.back(result: false),
@@ -655,7 +708,7 @@ class _ActionIcons extends StatelessWidget {
           ),
           TextButton(
             onPressed: () => Get.back(result: true),
-            child: Text(isDraft ? 'Delete' : 'Cancel Quotation',
+            child: Text(isPending ? 'Remove' : (isDraft ? 'Delete' : 'Cancel Quotation'),
                 style: TextStyle(color: AppColors.danger)),
           ),
         ],

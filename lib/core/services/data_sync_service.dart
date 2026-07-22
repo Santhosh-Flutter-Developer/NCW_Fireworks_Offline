@@ -233,7 +233,21 @@ class DataSyncService extends GetxService {
     await _cache.putJsonList(CacheKeys.priceProducts, products.values.toList());
   }
 
+  /// Pushes anything in the quotation pending-sync queue to
+  /// `quotation.php` in one batch first — this is what the Sync button
+  /// triggers per the offline-first design: queued adds/edits (draft or
+  /// confirmed) go out, and only once that succeeds (or there was
+  /// nothing queued) does the quotation list get re-pulled and
+  /// re-cached, alongside a refresh of the pricelist/product catalogue
+  /// the Add/Edit form reads offline. If the push fails, this throws and
+  /// the pull below never runs — [_runStep]/[_syncOne] catch it, and the
+  /// queue is left intact for the next Sync attempt.
   Future<void> _syncQuotations() async {
+    final creator = _sessionService.currentSession.value?.userId;
+    if (creator != null && creator.isNotEmpty) {
+      await _quotationRepository.syncPendingQuotations(creator: creator);
+    }
+
     final parties = <String, Map<String, dynamic>>{};
 
     Future<void> syncTab(
@@ -247,6 +261,10 @@ class DataSyncService extends GetxService {
         drafted: drafted,
         cancelled: cancelled,
       );
+      // Cache every field `quotation_listing` gives us (not just the
+      // id/number/date/party/qty/total summary) so editing a synced
+      // quotation later works entirely offline — see the `_full` marker
+      // in `QuotationListItem.fromJson`.
       final items = result.items
           .map((q) => {
                 'quotation_id': q.quotationId,
@@ -256,6 +274,26 @@ class DataSyncService extends GetxService {
                 'total_quantity': q.totalQuantity,
                 'grand_total': q.grandTotal,
                 'estimate_id': q.estimateId,
+                'party_id': q.partyId,
+                'pricelist_id': q.pricelistId,
+                'pricelist_name': q.pricelistName,
+                'agent_id': q.agentId,
+                'product_id': q.products.map((p) => p.productId).join(','),
+                'product_name': q.products.map((p) => p.productName).join(','),
+                'product_quantity':
+                    q.products.map((p) => p.quantity).join(','),
+                'unit_id': q.products.map((p) => p.unitId).join(','),
+                'unit_name': q.products.map((p) => p.unitName).join(','),
+                'product_rate': q.products.map((p) => p.rate).join(','),
+                'product_discount':
+                    q.products.map((p) => p.productDiscount).join(','),
+                'product_amount': q.products.map((p) => p.amount).join(','),
+                'section1_add_value': q.section1AddValue,
+                'section1_discount': q.section1Discount,
+                'section2_add_value': q.section2AddValue,
+                'section2_discount': q.section2Discount,
+                'drafted': q.isDraft ? '1' : '0',
+                '_full': true,
               })
           .toList();
       for (final p in result.partyList) {
@@ -273,6 +311,41 @@ class DataSyncService extends GetxService {
         drafted: '0', cancelled: '1');
     await _cache.putJsonList(
         CacheKeys.quotationParties, parties.values.toList());
+
+    await _syncQuotationCatalogue();
+  }
+
+  /// Refreshes the pricelist dropdown + full per-pricelist product
+  /// catalogue the Add/Edit Quotation form reads offline
+  /// (`QuotationRepository.cachedPricelists`/`cachedProductsForPricelist`).
+  /// One quick call for the pricelist list, then one call per pricelist
+  /// for its products — for the small number of pricelists a business
+  /// like this actually has, this stays fast; if that ever changes,
+  /// this is the one place to add a size guard.
+  Future<void> _syncQuotationCatalogue() async {
+    _announce('Syncing quotation product catalogue');
+    final init = await _quotationRepository.getFormInitData();
+    await _cache.putJsonList(
+      CacheKeys.quotationPricelists,
+      init.pricelist.map((p) => {'id': p.id, 'name': p.name}).toList(),
+    );
+
+    final allProducts = <Map<String, dynamic>>[];
+    for (final pricelist in init.pricelist) {
+      final result =
+          await _quotationRepository.getProductsForPricelist(pricelist.id);
+      allProducts.addAll(result.products.map((p) => {
+            'pricelist_id': pricelist.id,
+            'product_id': p.productId,
+            'product_name': p.productName,
+            'unit_id': p.unitId,
+            'unit_name': p.unitName,
+            'rate': p.rate,
+            'product_discount': p.productDiscount ? '1' : '0',
+            'current_stock': p.currentStock,
+          }));
+    }
+    await _cache.putJsonList(CacheKeys.quotationProducts, allProducts);
   }
 
   Future<void> _syncEstimations() async {

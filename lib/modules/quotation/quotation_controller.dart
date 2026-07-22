@@ -212,21 +212,51 @@ class QuotationController extends GetxController {
         try {
           date = _serverStoredDateFormat.parse(item.quotationDate);
         } catch (_) {
-          date = DateTime.now();
+          try {
+            date = _apiDateFormat.parseStrict(item.quotationDate);
+          } catch (_) {
+            date = DateTime.now();
+          }
         }
         final party = item.partyNameMobileCity.trim();
+        final knownFullDetails = item.isPending || item.hasFullDetails;
         return QuotationModel(
-          id: item.quotationId,
+          id: item.isPending ? item.localId : item.quotationId,
           quotationNo: item.quotationNumber,
-          serverQuotationId: item.quotationId,
-          partyId: '',
+          serverQuotationId: item.quotationId.isEmpty ? null : item.quotationId,
+          partyId: item.partyId,
           partyName: party.isEmpty ? 'Direct' : party,
+          pricelistId: item.pricelistId,
+          pricelistName: item.pricelistName,
           date: date,
-          items: const [],
+          items: item.products
+              .map((p) => BillingItemModel(
+                    productId: p.productId,
+                    productName: p.productName,
+                    quantity: int.tryParse(p.quantity) ?? 1,
+                    rate: double.tryParse(p.rate) ?? 0,
+                    unit: p.unitName,
+                    unitId: p.unitId,
+                    section: p.productDiscount == '1' ? 1 : 2,
+                  ))
+              .toList(),
           status: rowStatus,
-          serverGrandTotal: item.grandTotal,
-          serverQtyLabel: item.totalQuantity,
+          section1Add: double.tryParse(item.section1AddValue) ?? 0,
+          section1Discount: double.tryParse(item.section1Discount) ?? 0,
+          section2Add: double.tryParse(item.section2AddValue) ?? 0,
+          section2Discount: double.tryParse(item.section2Discount) ?? 0,
+          // A pending row's total/qty aren't known server-side yet — let
+          // QuotationModel derive them from its own items instead of
+          // reading a stale/zero server value.
+          serverGrandTotal: item.isPending ? null : item.grandTotal,
+          serverQtyLabel: item.isPending ? null : item.totalQuantity,
           estimateId: item.estimateId,
+          isPending: item.isPending,
+          localId: item.isPending ? item.localId : null,
+          // A row cached by an older build of this app only has the
+          // summary fields — not safe to re-save without fetching the
+          // rest first (see QuotationController.startEdit).
+          hasFullDetails: knownFullDetails,
         );
       }));
 
@@ -323,7 +353,25 @@ class QuotationController extends GetxController {
   /// draft row, permanently deletes it (server sets `deleted = 1`) — the
   /// same `delete_quotation_id` call does either, decided server-side by
   /// the quotation's own `drafted` flag.
+  ///
+  /// A row that's still only in the pending-sync queue (never sent to
+  /// the server) is removed from the queue instead — there's nothing on
+  /// the server yet for `delete_quotation_id` to act on, and this action
+  /// isn't part of the offline-only add/edit flow, so it still needs the
+  /// network for anything already synced.
   Future<void> deleteQuotation(QuotationModel quotation) async {
+    if (quotation.isPending) {
+      quotations.remove(quotation);
+      if (quotation.localId != null) {
+        await _quotationRepository.removePendingQuotation(quotation.localId!);
+      }
+      Get.snackbar(
+        'Removed from view',
+        '${quotation.quotationNo.isEmpty ? "This quotation" : quotation.quotationNo} was removed before it was ever synced.',
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return;
+    }
     final id = quotation.serverQuotationId ?? quotation.id;
     if (id.isEmpty) {
       quotations.remove(quotation);
@@ -434,24 +482,19 @@ class QuotationController extends GetxController {
     loadProductsForSelectedPricelist();
   }
 
+  /// Products offered under the selected pricelist, for the "Add Item"
+  /// picker — read straight from the offline catalogue
+  /// [DataSyncService] caches at login/Sync
+  /// (`QuotationRepository.cachedProductsForPricelist`). No network call,
+  /// online or off.
   Future<void> loadProductsForSelectedPricelist() async {
     final pricelistId = selectedPricelistId.value;
     if (pricelistId == null || pricelistId.isEmpty) {
       productOptions.clear();
       return;
     }
-    isLoadingProducts.value = true;
-    try {
-      final result =
-          await _quotationRepository.getProductsForPricelist(pricelistId);
-      productOptions.assignAll(result.products);
-    } on ApiException catch (e) {
-      productOptions.clear();
-      Get.snackbar('Could not load products', e.message,
-          snackPosition: SnackPosition.BOTTOM);
-    } finally {
-      isLoadingProducts.value = false;
-    }
+    productOptions
+        .assignAll(_quotationRepository.cachedProductsForPricelist(pricelistId));
   }
 
   // ---- Form: create / edit bootstrap ------------------------------------
@@ -474,17 +517,100 @@ class QuotationController extends GetxController {
   void startCreate() {
     editingQuotation = null;
     _resetFormFields();
-    isLoadingForm.value = true;
-    _loadFormInit(showQuotationId: '');
+    _loadDropdownDataFromCache();
+    if (pricelistOptions.isNotEmpty) {
+      // New quotation — default to the first pricelist, matching the
+      // web app's Add Quotation screen.
+      selectedPricelistId.value = pricelistOptions.first.id;
+      selectedPricelist.value = pricelistOptions.first.name;
+      loadProductsForSelectedPricelist();
+    }
+    _syncMoneyControllers();
   }
 
+  /// Opens the Edit form for [quotation]. The offline cache now carries
+  /// every field `quotation_listing` returns (see `DataSyncService`/
+  /// `QuotationListItem`), and every pending (not-yet-synced) row is
+  /// fully known too — so this populates the form directly and works
+  /// with no network call at all in the normal case. The
+  /// `show_quotation_id` fetch below only ever runs for a row cached by
+  /// an older build of this app (before full details were stored) that
+  /// hasn't been refreshed by a sync yet; it's a one-time fallback, not
+  /// something the offline-first flow depends on.
   void startEdit(QuotationModel quotation) {
     editingQuotation = quotation;
     _resetFormFields();
+    _loadDropdownDataFromCache();
     quotationDate.value = quotation.date;
+
+    if (quotation.hasFullDetails) {
+      _populateFormFromModel(quotation);
+      return;
+    }
+
     isLoadingForm.value = true;
     _loadFormInit(
         showQuotationId: quotation.serverQuotationId ?? quotation.id);
+  }
+
+  /// Loads pricelist/party dropdown options from the offline cache that
+  /// [DataSyncService] refreshes at login and via Sync — no network call.
+  void _loadDropdownDataFromCache() {
+    pricelistOptions.assignAll(_quotationRepository.cachedPricelists());
+    parties.assignAll(_quotationRepository.cachedParties().map((p) => PartyModel(
+          id: p.id,
+          serverPartyId: p.id,
+          name: p.name.isEmpty ? 'Untitled Party' : p.name,
+          hasFullDetails: false,
+        )));
+  }
+
+  /// Populates the form directly from [quotation]'s own fields — used
+  /// whenever [quotation] already has full details (every pending row,
+  /// and every row synced since this app started caching full details).
+  void _populateFormFromModel(QuotationModel quotation) {
+    if (quotation.pricelistId.isNotEmpty) {
+      selectedPricelistId.value = quotation.pricelistId;
+      final pl = pricelistOptions
+          .firstWhereOrNull((p) => p.id == quotation.pricelistId);
+      selectedPricelist.value =
+          pl?.name ?? (quotation.pricelistName.isEmpty
+              ? null
+              : quotation.pricelistName);
+    }
+    if (quotation.partyId.isNotEmpty) {
+      selectedParty.value = parties
+              .firstWhereOrNull((p) => p.serverPartyId == quotation.partyId) ??
+          PartyModel(
+            id: quotation.partyId,
+            serverPartyId: quotation.partyId,
+            name: quotation.partyName,
+            hasFullDetails: false,
+          );
+    }
+
+    formItems.assignAll(quotation.items
+        .map((i) => BillingItemModel(
+              productId: i.productId,
+              productName: i.productName,
+              quantity: i.quantity,
+              rate: i.rate,
+              unit: i.unit,
+              unitId: i.unitId,
+              section: i.section,
+            ))
+        .toList());
+
+    section1Add.value = quotation.section1Add;
+    section1Discount.value = quotation.section1Discount;
+    section2Add.value = quotation.section2Add;
+    section2Discount.value = quotation.section2Discount;
+    _syncMoneyControllers();
+
+    if (selectedPricelistId.value != null &&
+        selectedPricelistId.value!.isNotEmpty) {
+      loadProductsForSelectedPricelist();
+    }
   }
 
   DateTime? _tryParseServerDate(String raw) {
@@ -496,21 +622,26 @@ class QuotationController extends GetxController {
     }
   }
 
-  /// Bootstraps the Add/Edit Quotation form via `show_quotation_id`:
-  /// dropdown data always, plus the existing quotation's own fields when
-  /// [showQuotationId] resolves to a real record.
+  /// Bootstraps the Add/Edit Quotation form via `show_quotation_id` — a
+  /// one-time backward-compat fallback for a row cached before this app
+  /// version started storing full details (see
+  /// `QuotationListItem.hasFullDetails`); the normal offline-first path
+  /// is [_loadDropdownDataFromCache] + [_populateFormFromModel], which
+  /// never touches the network.
   Future<void> _loadFormInit({required String showQuotationId}) async {
     try {
       final result = await _quotationRepository.getFormInitData(
           showQuotationId: showQuotationId);
 
-      pricelistOptions.assignAll(result.pricelist);
-      parties.assignAll(result.partyList.map((p) => PartyModel(
-            id: p.id,
-            serverPartyId: p.id,
-            name: p.name.isEmpty ? 'Untitled Party' : p.name,
-            hasFullDetails: false,
-          )));
+      if (result.pricelist.isNotEmpty) pricelistOptions.assignAll(result.pricelist);
+      if (result.partyList.isNotEmpty) {
+        parties.assignAll(result.partyList.map((p) => PartyModel(
+              id: p.id,
+              serverPartyId: p.id,
+              name: p.name.isEmpty ? 'Untitled Party' : p.name,
+              hasFullDetails: false,
+            )));
+      }
 
       final detail = result.detail;
       if (detail != null) {
@@ -546,7 +677,9 @@ class QuotationController extends GetxController {
         section2Add.value = double.tryParse(detail.section2AddValue) ?? 0;
         section2Discount.value =
             double.tryParse(detail.section2Discount) ?? 0;
-      } else if (pricelistOptions.isNotEmpty) {
+      } else if (pricelistOptions.isNotEmpty &&
+          (selectedPricelistId.value == null ||
+              selectedPricelistId.value!.isEmpty)) {
         // New quotation — default to the first pricelist, matching the
         // web app's Add Quotation screen.
         selectedPricelistId.value = pricelistOptions.first.id;
@@ -572,9 +705,12 @@ class QuotationController extends GetxController {
 
   // ---- Form: line items ---------------------------------------------------
 
-  /// Adds [productId] to the form. Looks up its rate/unit/section for the
-  /// currently selected pricelist via `selected_product_id` —
-  /// `product_pricelist_id` (used to list products) only returns id+name.
+  /// Adds [productId] to the form. Rate/unit/section come straight from
+  /// [productOptions] — already loaded for the selected pricelist by
+  /// [loadProductsForSelectedPricelist], and `product_pricelist_id`
+  /// returns rate/unit/discount-flag for every product already, so no
+  /// second `selected_product_id` round-trip is needed (or possible
+  /// offline).
   Future<void> addProductById({
     required String productId,
     required String productName,
@@ -587,38 +723,35 @@ class QuotationController extends GetxController {
           snackPosition: SnackPosition.BOTTOM);
       return;
     }
-    try {
-      final detail = await _quotationRepository.getSelectedProductDetail(
+
+    final option =
+        productOptions.firstWhereOrNull((p) => p.productId == productId);
+    if (option == null) {
+      Get.snackbar('Not available',
+          'This product isn\'t available under the selected pricelist',
+          snackPosition: SnackPosition.BOTTOM);
+      return;
+    }
+
+    // Matches the server's own rule for which totals section a line
+    // lands in once saved (see quotation.php's `product_discount` check).
+    final section = option.productDiscount ? 1 : 2;
+
+    final existingIndex = formItems.indexWhere(
+        (i) => i.productId == productId && i.section == section);
+    if (existingIndex >= 0) {
+      formItems[existingIndex].quantity += qty;
+      formItems.refresh();
+    } else {
+      formItems.add(BillingItemModel(
         productId: productId,
-        pricelistId: pricelistId,
-      );
-
-      // Matches the server's own rule for which totals section a line
-      // lands in once saved (see quotation.php's `product_discount` check).
-      final section = detail.productDiscount ? 1 : 2;
-
-      final existingIndex = formItems.indexWhere(
-          (i) => i.productId == productId && i.section == section);
-      if (existingIndex >= 0) {
-        formItems[existingIndex].quantity += qty;
-        formItems.refresh();
-      } else {
-        formItems.add(BillingItemModel(
-          productId: productId,
-          productName: productName,
-          quantity: qty,
-          rate: detail.rate,
-          unit: detail.unitName.isEmpty ? 'Pcs' : detail.unitName,
-          unitId: detail.unitId,
-          section: section,
-        ));
-      }
-    } on ApiRequestException catch (e) {
-      Get.snackbar('Could not add product', e.message,
-          snackPosition: SnackPosition.BOTTOM);
-    } on ApiException catch (e) {
-      Get.snackbar('Could not add product', e.message,
-          snackPosition: SnackPosition.BOTTOM);
+        productName: productName,
+        quantity: qty,
+        rate: option.rate,
+        unit: option.unitName.isEmpty ? 'Pcs' : option.unitName,
+        unitId: option.unitId,
+        section: section,
+      ));
     }
   }
 
@@ -739,6 +872,14 @@ class QuotationController extends GetxController {
 
   // ---- Form: save -----------------------------------------------------------
 
+  /// Saves the form. This is offline-only, always — draft or a real
+  /// confirm both save straight to this device and never call
+  /// `quotation.php` directly, whether or not the internet happens to be
+  /// available right now. Every save (either kind) is queued in
+  /// [CacheKeys.quotationPending] via
+  /// [QuotationRepository.queueQuotationForSync]; only a manual tap of
+  /// the Sync button (see [DataSyncService]) ever sends that queue to
+  /// the server, in one batch.
   Future<bool> save({required bool asDraft}) async {
     if (isSaving.value) return false;
 
@@ -772,21 +913,44 @@ class QuotationController extends GetxController {
 
     isSaving.value = true;
     try {
-      final result = await _quotationRepository.saveQuotation(
-        creator: session.userId,
-        editId: editingQuotation?.serverQuotationId ?? '',
+      // A pending (not-yet-synced) row keeps its own queue-entry id so
+      // re-editing it before syncing replaces that entry rather than
+      // adding a second one. A row already confirmed on the server uses
+      // its real quotation_id as the edit_id so the batch sync updates
+      // it in place instead of creating a duplicate. A brand-new
+      // quotation gets a fresh local id and an empty edit_id.
+      final localId = editingQuotation == null
+          ? _newLocalId()
+          : (editingQuotation!.localId ??
+              editingQuotation!.serverQuotationId ??
+              _newLocalId());
+      final editId = editingQuotation?.serverQuotationId ?? '';
+
+      await _quotationRepository.queueQuotationForSync(
+        localId: localId,
+        editId: editId,
         drafted: asDraft ? '1' : '0',
         quotationDate: _apiDateFormat.format(quotationDate.value),
         pricelistId: selectedPricelistId.value ?? '',
+        pricelistName: selectedPricelist.value ?? '',
         partyId: selectedParty.value?.serverPartyId ??
             selectedParty.value?.id ??
             '',
+        partyName: selectedParty.value?.name ?? '',
         products: formItems
-            .map((i) => QuotationProductLine(
-                  productId: i.productId,
-                  quantity: i.quantity.toString(),
-                  rate: i.rate.toString(),
-                ))
+            .map((i) => {
+                  'product_id': i.productId,
+                  'product_name': i.productName,
+                  'unit_id': i.unitId,
+                  'unit_name': i.unit,
+                  'product_quantity': i.quantity.toString(),
+                  'product_rate': i.rate.toString(),
+                  // Preserves which totals section this line was in, so
+                  // re-opening this pending row for editing shows it the
+                  // same way — matches the server's own product_discount
+                  // rule, just carried locally instead of re-derived.
+                  'product_discount': i.section == 1 ? '1' : '0',
+                })
             .toList(),
         section1AddValue:
             section1Add.value == 0 ? '' : section1Add.value.toString(),
@@ -802,22 +966,20 @@ class QuotationController extends GetxController {
 
       final wasCreate = editingQuotation == null;
       Get.back();
-      Get.snackbar('Saved', result.message,
-          snackPosition: SnackPosition.BOTTOM);
+      Get.snackbar(
+        wasCreate ? 'Saved offline' : 'Updated offline',
+        'Saved on this device. Tap Sync when you\'re online to send it to the server.',
+        snackPosition: SnackPosition.BOTTOM,
+      );
       if (wasCreate) currentPage.value = 1;
       activeTab.value = asDraft ? QuotationTab.draft : QuotationTab.active;
       await loadQuotations();
       return true;
-    } on ApiRequestException catch (e) {
-      Get.snackbar('Could not save', e.message,
-          snackPosition: SnackPosition.BOTTOM);
-      return false;
-    } on ApiException catch (e) {
-      Get.snackbar('Could not save', e.message,
-          snackPosition: SnackPosition.BOTTOM);
-      return false;
     } finally {
       isSaving.value = false;
     }
   }
+
+  /// A short, unique-enough id for a brand-new pending-queue entry.
+  String _newLocalId() => 'LOCAL-${DateTime.now().microsecondsSinceEpoch}';
 }

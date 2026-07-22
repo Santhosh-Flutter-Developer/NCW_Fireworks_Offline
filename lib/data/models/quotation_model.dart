@@ -36,6 +36,22 @@ class QuotationModel {
   /// While non-empty, the Convert/Edit/Delete row actions are hidden.
   String estimateId;
 
+  /// True when this row was built from the on-device pending-sync queue
+  /// — an add/edit made on this device that hasn't been sent to
+  /// `quotation.php` yet. Drives the "Pending sync" badge on the list.
+  bool isPending;
+
+  /// The pending-sync queue entry's own id, when [isPending] is true —
+  /// used to update/remove that exact entry on a later edit or delete.
+  /// Null for a row that came from the synced server cache.
+  String? localId;
+
+  /// Whether every field on this row (party/pricelist/items/sections) is
+  /// actually known — false only for a row cached before full details
+  /// were stored, which needs a `show_quotation_id` fetch before it's
+  /// safe to edit (see `QuotationController.startEdit`).
+  bool hasFullDetails;
+
   QuotationModel({
     required this.id,
     required this.quotationNo,
@@ -56,6 +72,9 @@ class QuotationModel {
     this.serverGrandTotal,
     this.serverQtyLabel,
     this.estimateId = '',
+    this.isPending = false,
+    this.localId,
+    this.hasFullDetails = true,
   });
 
   /// True once this quotation has been converted to an estimate.

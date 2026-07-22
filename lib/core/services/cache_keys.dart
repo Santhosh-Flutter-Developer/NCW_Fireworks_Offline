@@ -23,6 +23,24 @@ class CacheKeys {
   static const quotationCancel = 'quotation_cancel';
   static const quotationParties = 'quotation_parties';
 
+  /// Queue of Quotation adds/edits made on this device that haven't been
+  /// sent to `quotation.php` yet. Every save from the Quotation form —
+  /// draft or confirmed, create or edit, online or offline — lands here
+  /// first; only a manual tap of the Sync button ever drains it (see
+  /// [QuotationRepository.queueQuotationForSync] /
+  /// [QuotationRepository.syncPendingQuotations]).
+  static const quotationPending = 'quotation_pending';
+
+  /// Pricelist dropdown options (`{pricelist_id, pricelist_name}`) for the
+  /// Add/Edit Quotation form — synced once at login and via Sync, so
+  /// opening the form never needs the network.
+  static const quotationPricelists = 'quotation_pricelists';
+
+  /// The full product catalogue for every pricelist (id, name, unit,
+  /// rate, discount flag, each tagged with its `pricelist_id`) — backs
+  /// the form's product picker entirely offline.
+  static const quotationProducts = 'quotation_products';
+
   static const estimationActive = 'estimation_active';
   static const estimationDraft = 'estimation_draft';
   static const estimationCancel = 'estimation_cancel';
