@@ -95,13 +95,15 @@ class EstimateRepository {
   /// pricelist/agent/products instead — used to bootstrap the "Convert to
   /// Estimate" flow from the Quotation list.
   ///
-  /// Only called now for the "Convert to Estimate" flow (which still
-  /// needs the server's own view of the source quotation) and as a
-  /// one-time backward-compat fallback for an estimate cached before this
-  /// app version started storing full details (see
-  /// [EstimateListItem.hasFullDetails]) — the normal Add/Edit flow uses
+  /// Only called now as a one-time backward-compat fallback — either for
+  /// an estimate cached before this app version started storing full
+  /// details (see [EstimateListItem.hasFullDetails]), or for a "Convert
+  /// to Estimate" whose source quotation row hasn't got full details
+  /// cached yet either (see `QuotationModel.hasFullDetails`). The normal
+  /// Add/Edit flow, and the normal Convert-to-Estimate flow, use
   /// [cachedPricelists]/[cachedAgents]/[cachedParties]/[cachedOtherCharges]/
-  /// [cachedProductsForPricelist] instead and never touches the network.
+  /// [cachedProductsForPricelist] plus the source quotation's own cached
+  /// fields instead, and never touch the network.
   Future<EstimateInitResponseModel> getFormInitData({
     String showEstimateId = '',
     String convertQuotationId = '',

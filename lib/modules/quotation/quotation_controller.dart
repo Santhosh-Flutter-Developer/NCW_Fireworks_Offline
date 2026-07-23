@@ -543,6 +543,13 @@ class QuotationController extends GetxController {
   /// converted quotation row. Saving that form links the new estimate
   /// back to this quotation, which then hides its Convert/Edit/Delete
   /// actions once the list reloads.
+  ///
+  /// Passes the whole [quotation] (not just its id) so
+  /// `EstimationController.startConvertFromQuotation` can populate the
+  /// Estimate form straight from this row's own cached fields — no
+  /// network call needed, the same offline-first pattern already used
+  /// for editing a quotation or estimate directly (see
+  /// `startEdit`/`_populateFormFromModel` on both controllers).
   void convertToEstimate(QuotationModel quotation) {
     final id = quotation.serverQuotationId ?? quotation.id;
     if (id.isEmpty) return;
@@ -552,7 +559,7 @@ class QuotationController extends GetxController {
     final estimationController = Get.isRegistered<EstimationController>()
         ? Get.find<EstimationController>()
         : Get.put(EstimationController());
-    estimationController.startConvertFromQuotation(id);
+    estimationController.startConvertFromQuotation(quotation);
     Get.toNamed(AppRoutes.estimationForm);
   }
 

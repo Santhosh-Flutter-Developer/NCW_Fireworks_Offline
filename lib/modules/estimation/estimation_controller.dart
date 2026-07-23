@@ -14,6 +14,7 @@ import '../../data/models/estimate/estimate_product_list_response_model.dart';
 import '../../data/models/estimate/id_name.dart';
 import '../../data/models/estimation_model.dart';
 import '../../data/models/party_model.dart';
+import '../../data/models/quotation_model.dart';
 import '../../data/respositories/estimate_repository.dart';
 import '../../routes/app_routes.dart';
 import '../quotation/quotation_controller.dart';
@@ -842,19 +843,86 @@ class EstimationController extends GetxController {
   }
 
   /// Bootstraps a brand-new Add Estimate form pre-filled from an active
-  /// quotation's own party/pricelist/agent/products — the "Convert to
-  /// Estimate" action on the Quotation list. [quotationId] is kept and
-  /// sent back as `convert_quotation_id` when the form is saved. Still
-  /// goes through the live `show_estimate_id`/`convert_quotation_id` call
-  /// below — converting only makes sense for a quotation the server
-  /// already knows about (see `QuotationController.convertToEstimate`),
-  /// so there's already a real network round trip involved either way.
-  void startConvertFromQuotation(String quotationId) {
+  /// [quotation]'s own party/pricelist/products — the "Convert to
+  /// Estimate" action on the Quotation list. The quotation's own id
+  /// (server id once known, otherwise its local id) is kept and sent
+  /// back as `convert_quotation_id` when the form is saved.
+  ///
+  /// Offline-first, mirroring [startEdit]: every quotation row already
+  /// carries its own full details (either from the offline cache
+  /// `DataSyncService` refreshes at login/Sync, or — for a row not yet
+  /// synced — straight from the on-device pending queue), so this reads
+  /// [quotation]'s fields directly with no network call in the normal
+  /// case. The `show_estimate_id`/`convert_quotation_id` call below only
+  /// ever runs for a quotation row cached by an older app version (before
+  /// full details were stored) that hasn't been refreshed by a Sync yet
+  /// — a one-time backward-compat fallback, not something this flow
+  /// depends on.
+  void startConvertFromQuotation(QuotationModel quotation) {
     editingEstimation = null;
-    _convertQuotationId = quotationId;
+    final id = quotation.serverQuotationId ?? quotation.id;
+    _convertQuotationId = id;
     _resetFormFields();
+    _loadDropdownDataFromCache();
+    estimationDate.value = quotation.date;
+
+    if (quotation.hasFullDetails) {
+      _populateFormFromQuotation(quotation);
+      return;
+    }
+
     isLoadingForm.value = true;
-    _loadFormInit(showEstimateId: '', convertQuotationId: quotationId);
+    _loadFormInit(showEstimateId: '', convertQuotationId: id);
+  }
+
+  /// Populates the Add Estimate form directly from [quotation]'s own
+  /// party/pricelist/items/section totals — the offline counterpart of
+  /// [_populateFormFromModel], used by [startConvertFromQuotation]
+  /// whenever the source quotation already has full details. Quotations
+  /// don't carry other-charges, agent, or a stored total (those exist
+  /// only for estimates), so — matching a brand-new estimate — those
+  /// are left at their [_resetFormFields] defaults for the user to add.
+  void _populateFormFromQuotation(QuotationModel quotation) {
+    if (quotation.pricelistId.isNotEmpty) {
+      selectedPricelistId.value = quotation.pricelistId;
+      final pl = pricelistOptions
+          .firstWhereOrNull((p) => p.id == quotation.pricelistId);
+      selectedPricelist.value = pl?.name ??
+          (quotation.pricelistName.isEmpty ? null : quotation.pricelistName);
+    }
+    if (quotation.partyId.isNotEmpty) {
+      selectedParty.value = parties
+              .firstWhereOrNull((p) => p.serverPartyId == quotation.partyId) ??
+          PartyModel(
+            id: quotation.partyId,
+            serverPartyId: quotation.partyId,
+            name: quotation.partyName,
+            hasFullDetails: false,
+          );
+    }
+
+    formItems.assignAll(quotation.items
+        .map((i) => BillingItemModel(
+              productId: i.productId,
+              productName: i.productName,
+              quantity: i.quantity,
+              rate: i.rate,
+              unit: i.unit,
+              unitId: i.unitId,
+              section: i.section,
+            ))
+        .toList());
+
+    section1Add.value = quotation.section1Add;
+    section1Discount.value = quotation.section1Discount;
+    section2Add.value = quotation.section2Add;
+    section2Discount.value = quotation.section2Discount;
+    _syncMoneyControllers();
+
+    if (selectedPricelistId.value != null &&
+        selectedPricelistId.value!.isNotEmpty) {
+      loadProductsForSelectedPricelist();
+    }
   }
 
   DateTime? _tryParseServerDate(String raw) {
