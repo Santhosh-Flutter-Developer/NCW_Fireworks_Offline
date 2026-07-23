@@ -221,12 +221,29 @@ class QuotationController extends GetxController {
       quotations.assignAll(result.items.map((item) {
         DateTime date;
         try {
-          date = _serverStoredDateFormat.parse(item.quotationDate);
+          // Pending (not-yet-synced) rows are stored as dd-MM-yyyy (see
+          // QuotationRepository.queueQuotationForSync); synced rows come
+          // back from the server as yyyy-MM-dd. Picking the format
+          // directly by [item.isPending] avoids the bug where
+          // DateFormat('yyyy-MM-dd').parse(...) — the *lenient* parse,
+          // not parseStrict — silently "succeeds" on a dd-MM-yyyy string
+          // by reinterpreting its digit groups as year/month/day in the
+          // wrong order (e.g. "15-01-2026" misread as year 15, causing
+          // the day component to overflow into a garbage date like
+          // "15-01-0029"), instead of throwing and falling through to
+          // the correct format.
+          date = item.isPending
+              ? _apiDateFormat.parseStrict(item.quotationDate)
+              : _serverStoredDateFormat.parseStrict(item.quotationDate);
         } catch (_) {
           try {
             date = _apiDateFormat.parseStrict(item.quotationDate);
           } catch (_) {
-            date = DateTime.now();
+            try {
+              date = _serverStoredDateFormat.parseStrict(item.quotationDate);
+            } catch (_) {
+              date = DateTime.now();
+            }
           }
         }
         final party = item.partyNameMobileCity.trim();
