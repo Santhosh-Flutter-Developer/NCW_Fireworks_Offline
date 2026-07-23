@@ -369,19 +369,21 @@ class QuotationController extends GetxController {
         _quotationRepository.existsInSyncedCache(quotationId);
   }
 
-  /// Cancels a quotation — confirmed (Active) or Draft alike — mirroring
-  /// the server's own `drafted`/`cancelled` flags.
+  /// Cancels a confirmed (non-draft) quotation, or permanently deletes a
+  /// draft — mirrors the server's own `delete_quotation_id` rule based
+  /// on the quotation's `drafted` flag.
   ///
-  /// Cancel is offline-first for both, just like Add/Edit: cancelling a
-  /// quotation the server already knows about queues a
-  /// `drafted: "0"` / `cancelled: "1"` update in the same pending-sync
-  /// batch (see [QuotationRepository.queueQuotationForSync]) and moves
-  /// it to the Cancel tab immediately — only a Sync tap actually tells
-  /// the server. This is the same shape whether the quotation being
-  /// cancelled was a Draft or already Active. A quotation the server
-  /// has never confirmed (still only in the pending-sync queue) just
-  /// has its queue entry dropped — there's nothing server-side yet to
-  /// cancel.
+  /// Cancel is offline-first, just like Add/Edit: cancelling a
+  /// quotation the server already knows about queues a `cancelled: "1"`
+  /// update in the same pending-sync batch (see
+  /// [QuotationRepository.queueQuotationForSync]) and moves it to the
+  /// Cancel tab immediately — only a Sync tap actually tells the
+  /// server. Deleting a draft still needs the live
+  /// `delete_quotation_id` call (unchanged — permanent delete isn't
+  /// part of the offline Cancel flow). Either way, a quotation the
+  /// server has never confirmed (still only in the pending-sync queue)
+  /// just has its queue entry dropped — there's nothing server-side yet
+  /// to cancel or delete.
   Future<void> deleteQuotation(QuotationModel quotation) async {
     final quotationId =
         quotation.serverQuotationId ?? quotation.localId ?? quotation.id;
@@ -405,12 +407,28 @@ class QuotationController extends GetxController {
       return;
     }
 
-    // Known to the server — cancel offline, Draft or Active alike.
-    // Queues the same full row a save would (so an edit already sitting
-    // in the queue, not yet synced, is updated in place rather than
-    // duplicated), just with `drafted: '0'` / `cancelled: '1'` — the
-    // server's own on-cancel shape, same for a Draft or an Active
-    // quotation being cancelled.
+    final isDraft = quotation.status == DocStatus.draft;
+    if (isDraft) {
+      try {
+        final result = await _quotationRepository.deleteQuotation(
+            quotationId: quotationId);
+        Get.snackbar('Draft deleted', result.message,
+            snackPosition: SnackPosition.BOTTOM);
+        await loadQuotations();
+      } on ApiRequestException catch (e) {
+        Get.snackbar('Could not delete', e.message,
+            snackPosition: SnackPosition.BOTTOM);
+      } on ApiException catch (e) {
+        Get.snackbar('Could not delete', e.message,
+            snackPosition: SnackPosition.BOTTOM);
+      }
+      return;
+    }
+
+    // Confirmed quotation known to the server — cancel offline. Queues
+    // the same full row a save would (so an edit already sitting in the
+    // queue, not yet synced, is updated in place rather than
+    // duplicated), just with `cancelled` added.
     await _quotationRepository.queueQuotationForSync(
       localId: quotationId,
       editId: quotationId,
@@ -470,9 +488,9 @@ class QuotationController extends GetxController {
     try {
       final bytes = await _buildQuotationPdfBytes(quotation);
       await Printing.layoutPdf(onLayout: (_) async => bytes);
-    } catch (_) {
-      Get.snackbar('Could not print', 'Unable to generate the quotation report',
-          snackPosition: SnackPosition.BOTTOM);
+    } catch (e, st) {
+      debugPrint('printQuotation failed: $e\n$st');
+      _showPdfErrorDialog('Could not print', e, st);
     }
   }
 
@@ -487,11 +505,35 @@ class QuotationController extends GetxController {
       );
       Get.snackbar('Downloaded', 'Quotation report saved',
           snackPosition: SnackPosition.BOTTOM);
-    } catch (_) {
-      Get.snackbar('Could not download',
-          'Unable to generate the quotation report',
-          snackPosition: SnackPosition.BOTTOM);
+    } catch (e, st) {
+      debugPrint('downloadQuotation failed: $e\n$st');
+      _showPdfErrorDialog('Could not download', e, st);
     }
+  }
+
+  /// A Snackbar truncates long text, which has repeatedly hidden the
+  /// actual exception behind a generic "Unable to generate..." message —
+  /// this shows the full error (and a copy button for the stack trace)
+  /// in a scrollable dialog instead, so a real bug is actually visible
+  /// rather than swallowed by the UI.
+  void _showPdfErrorDialog(String title, Object error, StackTrace st) {
+    Get.dialog(
+      AlertDialog(
+        title: Text(title),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: SelectableText('$error\n\n$st'),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Get.back(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 
   // ---- Convert to Estimate --------------------------------------------------

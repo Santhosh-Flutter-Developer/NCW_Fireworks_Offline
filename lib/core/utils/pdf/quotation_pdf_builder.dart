@@ -15,6 +15,12 @@ import 'indian_currency_words.dart';
 /// so Print and Download both work the same whether the device is
 /// online or not, and whether or not the quotation has been synced yet.
 ///
+/// Paginates properly across multiple pages, but deliberately never uses
+/// `pw.Table` (or anything else implementing `SpanningWidget`) anywhere
+/// in the document — see the note in [build] for why. The product
+/// "table" is drawn as individual bordered rows instead, each its own
+/// ordinary widget.
+///
 /// Mirrors the layout of the server's own `rpt_quotation_a4.php` report:
 /// centered title + letterhead, a bordered two-column "Bill To" /
 /// "Bill Date, Bill No, HSN Code" box, a product table with a grey
@@ -26,7 +32,7 @@ class QuotationPdfBuilder {
   static const _headerFill = PdfColor.fromInt(0xFF65727A); // rgb(101,114,122)
   static const _borderColor = PdfColor.fromInt(0xFF000000);
   static final _dateFormat = DateFormat('dd-MM-yyyy');
-  static final _numberFormat = NumberFormat('#,##0.00', 'en_IN');
+  static final _numberFormat = NumberFormat('#,##0.00');
 
   static Future<Uint8List> build({
     required QuotationModel quotation,
@@ -40,17 +46,35 @@ class QuotationPdfBuilder {
         pageFormat: PdfPageFormat.a4.copyWith(
           marginLeft: 10 * PdfPageFormat.mm,
           marginRight: 10 * PdfPageFormat.mm,
-          marginTop: 5 * PdfPageFormat.mm,
-          marginBottom: 10 * PdfPageFormat.mm,
+          marginTop: 8 * PdfPageFormat.mm,
+          marginBottom: 8 * PdfPageFormat.mm,
         ),
-        header: (context) => _buildHeader(quotation, party),
-        footer: (context) => _buildFooter(context),
+        // No header:/footer: callbacks — everything below is one flat
+        // list of ordinary widgets, each individually small enough to
+        // fit a page on its own, and each wrapped via _s() (see below).
+        // That matters because of a real, confirmed bug in this
+        // package's pinned version: `pw.Table` AND `pw.Column` both
+        // implement SpanningWidget (used to split a widget across
+        // pages) with `hasMoreWidgets` hardcoded to always return true.
+        // The moment either needs to split across a page boundary at
+        // all, MultiPage can never detect it's finished, and keeps
+        // generating pages until it throws TooManyPagesException — even
+        // for a tiny quotation. That path only triggers for a widget
+        // whose *own* `canSpan` getter is true; `pw.Row`'s is hardcoded
+        // false based purely on its axis, regardless of what's nested
+        // inside — so wrapping every item in a single-child Row (via
+        // _s()) shields any Column nested anywhere inside it, and also
+        // makes it stretch to the full page width for free.
         build: (context) => [
-          if (isCancelled) _buildCancelledStamp(),
-          _buildProductTable(quotation),
-          _buildTotals(quotation),
+          _s(_buildLetterhead(quotation, party)),
+          pw.SizedBox(height: 4),
+          if (isCancelled) _s(_buildCancelledStamp()),
+          for (final row in _buildProductRows(quotation)) _s(row),
+          for (final row in _buildTotals(quotation)) _s(row),
           pw.SizedBox(height: 6),
-          _buildDeclarationAndSignature(quotation),
+          _s(_buildDeclarationAndSignature(quotation)),
+          pw.SizedBox(height: 6),
+          _s(_buildFooter()),
         ],
       ),
     );
@@ -58,9 +82,19 @@ class QuotationPdfBuilder {
     return doc.save();
   }
 
-  // ---- Header: title + letterhead + Bill To / Bill Date box ----------
+  /// Wraps [child] as the sole child of a single-item `pw.Row`. Two
+  /// purposes at once: `Row.canSpan` is hardcoded `false` regardless of
+  /// what's nested inside (see the note in [build]), so this shields any
+  /// `pw.Column` anywhere inside [child] from the SpanningWidget bug;
+  /// and `pw.Expanded` makes it stretch to the page's full width, same
+  /// as everything in the sample layout.
+  static pw.Widget _s(pw.Widget child) {
+    return pw.Row(children: [pw.Expanded(child: child)]);
+  }
 
-  static pw.Widget _buildHeader(
+  // ---- Letterhead: title + company block + Bill To / Bill Date box ---
+
+  static pw.Widget _buildLetterhead(
     QuotationModel quotation,
     PartyListItem? party,
   ) {
@@ -186,109 +220,157 @@ class QuotationPdfBuilder {
   // ---- Cancelled watermark ---------------------------------------------
 
   static pw.Widget _buildCancelledStamp() {
-    return pw.Stack(
-      children: [
-        pw.Positioned(
-          left: 0,
-          right: 0,
-          top: 40,
-          child: pw.Center(
-            child: pw.Transform.rotate(
-              angle: 0.5,
-              child: pw.Opacity(
-                opacity: 0.25,
-                child: pw.Text(
-                  'CANCELLED',
-                  style: pw.TextStyle(
-                    fontSize: 60,
-                    fontWeight: pw.FontWeight.bold,
-                    color: PdfColors.red,
-                  ),
-                ),
-              ),
+    // A plain centered block instead of Stack+Positioned — this sits in
+    // MultiPage's normal auto-flowing content list, which doesn't give a
+    // Stack the bounded size it needs to position children against. No
+    // explicit width either — _s()'s wrapping Expanded (see build())
+    // already gives this the full page width.
+    return pw.Container(
+      alignment: pw.Alignment.center,
+      padding: const pw.EdgeInsets.symmetric(vertical: 8),
+      child: pw.Transform.rotate(
+        angle: 0.4,
+        child: pw.Opacity(
+          opacity: 0.4,
+          child: pw.Text(
+            'CANCELLED',
+            style: pw.TextStyle(
+              fontSize: 40,
+              fontWeight: pw.FontWeight.bold,
+              color: PdfColors.red,
             ),
           ),
         ),
-      ],
+      ),
     );
   }
 
-  // ---- Product table --------------------------------------------------
+  // ---- Product rows (deliberately not a pw.Table — see build()'s note) --
 
-  static pw.Widget _buildProductTable(QuotationModel quotation) {
-    final headerStyle = pw.TextStyle(
+  // Flex ratios mirroring the original mm widths (10/100/30/25/25 of 190):
+  static const _colSNo = 5;
+  static const _colProduct = 52;
+  static const _colQty = 16;
+  static const _colRate = 13;
+  static const _colAmount = 14;
+
+  static pw.Widget _gridCell(
+    pw.Widget child, {
+    required int flex,
+    bool isLast = false,
+  }) {
+    return pw.Expanded(
+      flex: flex,
+      child: pw.Container(
+        decoration: pw.BoxDecoration(
+          border: pw.Border(
+            right: isLast
+                ? pw.BorderSide.none
+                : const pw.BorderSide(color: _borderColor, width: 0.5),
+          ),
+        ),
+        padding: const pw.EdgeInsets.symmetric(vertical: 3, horizontal: 2),
+        child: child,
+      ),
+    );
+  }
+
+  static pw.Widget _productHeaderRow() {
+    final style = pw.TextStyle(
       fontSize: 8,
       fontWeight: pw.FontWeight.bold,
       color: PdfColors.white,
     );
-    final cellStyle = const pw.TextStyle(fontSize: 8);
-
-    pw.Widget headerCell(String text, pw.TextAlign align) => pw.Container(
-          color: _headerFill,
-          padding: const pw.EdgeInsets.symmetric(vertical: 3, horizontal: 2),
-          child: pw.Text(text, style: headerStyle, textAlign: align),
+    pw.Widget cell(String text, int flex, {bool isLast = false}) => _gridCell(
+          pw.Text(text, style: style, textAlign: pw.TextAlign.center),
+          flex: flex,
+          isLast: isLast,
         );
 
-    final rows = <pw.TableRow>[
-      pw.TableRow(children: [
-        headerCell('S.No', pw.TextAlign.center),
-        headerCell('Product', pw.TextAlign.center),
-        headerCell('Qty', pw.TextAlign.center),
-        headerCell('Rate(Rs.)', pw.TextAlign.center),
-        headerCell('Amount(Rs.)', pw.TextAlign.center),
-      ]),
-    ];
+    return pw.Container(
+      decoration: const pw.BoxDecoration(
+        color: _headerFill,
+        border: pw.Border(
+          top: pw.BorderSide(color: _borderColor, width: 0.5),
+          left: pw.BorderSide(color: _borderColor, width: 0.5),
+          right: pw.BorderSide(color: _borderColor, width: 0.5),
+        ),
+      ),
+      child: pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+        children: [
+          cell('S.No', _colSNo),
+          cell('Product', _colProduct),
+          cell('Qty', _colQty),
+          cell('Rate(Rs.)', _colRate),
+          cell('Amount(Rs.)', _colAmount, isLast: true),
+        ],
+      ),
+    );
+  }
 
+  static pw.Widget _productRow(int index, BillingItemModel item) {
+    final cellStyle = const pw.TextStyle(fontSize: 8);
+    final isEven = index.isEven;
+
+    return pw.Container(
+      decoration: pw.BoxDecoration(
+        border: const pw.Border(
+          left: pw.BorderSide(color: _borderColor, width: 0.5),
+          right: pw.BorderSide(color: _borderColor, width: 0.5),
+          bottom: pw.BorderSide(color: _borderColor, width: 0.5),
+        ),
+        color: isEven ? null : PdfColors.grey100,
+      ),
+      child: pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+        children: [
+          _gridCell(
+            pw.Text('$index',
+                style: pw.TextStyle(
+                    fontSize: 8, fontWeight: pw.FontWeight.bold),
+                textAlign: pw.TextAlign.center),
+            flex: _colSNo,
+          ),
+          _gridCell(
+            pw.Text(' ${item.productName}', style: cellStyle),
+            flex: _colProduct,
+          ),
+          _gridCell(
+            pw.Text('${item.quantity} ${item.unit}',
+                style: cellStyle, textAlign: pw.TextAlign.center),
+            flex: _colQty,
+          ),
+          _gridCell(
+            pw.Text(_numberFormat.format(item.rate),
+                style: cellStyle, textAlign: pw.TextAlign.right),
+            flex: _colRate,
+          ),
+          _gridCell(
+            pw.Text(_numberFormat.format(item.amount),
+                style: cellStyle, textAlign: pw.TextAlign.right),
+            flex: _colAmount,
+            isLast: true,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The product table, one bordered row per widget instead of a single
+  /// `pw.Table` — see the note in [build] for why.
+  static List<pw.Widget> _buildProductRows(QuotationModel quotation) {
+    final rows = <pw.Widget>[_productHeaderRow()];
     var index = 1;
     for (final item in quotation.items) {
-      rows.add(
-        pw.TableRow(children: [
-          pw.Padding(
-            padding: const pw.EdgeInsets.symmetric(vertical: 2, horizontal: 2),
-            child: pw.Text('${index++}',
-                style:
-                    pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
-                textAlign: pw.TextAlign.center),
-          ),
-          pw.Padding(
-            padding: const pw.EdgeInsets.symmetric(vertical: 2, horizontal: 2),
-            child: pw.Text(' ${item.productName}', style: cellStyle),
-          ),
-          pw.Padding(
-            padding: const pw.EdgeInsets.symmetric(vertical: 2, horizontal: 2),
-            child: pw.Text('${item.quantity} ${item.unit}',
-                style: cellStyle, textAlign: pw.TextAlign.center),
-          ),
-          pw.Padding(
-            padding: const pw.EdgeInsets.symmetric(vertical: 2, horizontal: 2),
-            child: pw.Text(_numberFormat.format(item.rate),
-                style: cellStyle, textAlign: pw.TextAlign.right),
-          ),
-          pw.Padding(
-            padding: const pw.EdgeInsets.symmetric(vertical: 2, horizontal: 2),
-            child: pw.Text(_numberFormat.format(item.amount),
-                style: cellStyle, textAlign: pw.TextAlign.right),
-          ),
-        ]),
-      );
+      rows.add(_productRow(index++, item));
     }
-
-    return pw.Table(
-      border: pw.TableBorder.all(color: _borderColor, width: 0.5),
-      columnWidths: const {
-        0: pw.FlexColumnWidth(0.5),
-        1: pw.FlexColumnWidth(5.2),
-        2: pw.FlexColumnWidth(1.6),
-        3: pw.FlexColumnWidth(1.35),
-        4: pw.FlexColumnWidth(1.35),
-      },
-      children: rows,
-    );
+    return rows;
   }
 
   // ---- Totals: per-section add/discount, then combined summary -------
 
-  static pw.Widget _buildTotals(QuotationModel quotation) {
+  static List<pw.Widget> _buildTotals(QuotationModel quotation) {
     final widgets = <pw.Widget>[];
 
     final sections = [
@@ -393,8 +475,7 @@ class QuotationPdfBuilder {
       ),
     );
 
-    return pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: widgets);
+    return widgets;
   }
 
   static pw.Widget _totalRow(String label, double value, {bool bold = false}) {
@@ -486,7 +567,7 @@ class QuotationPdfBuilder {
 
   // ---- Footer -----------------------------------------------------------
 
-  static pw.Widget _buildFooter(pw.Context context) {
+  static pw.Widget _buildFooter() {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: [
@@ -498,7 +579,11 @@ class QuotationPdfBuilder {
         pw.Align(
           alignment: pw.Alignment.centerRight,
           child: pw.Text(
-            'Page No : ${context.pageNumber} / ${context.pagesCount}',
+            // A plain, static "Page No : 1" instead of a live "x / y" —
+            // that needs MultiPage's header/footer callbacks (with their
+            // own Context), which this document deliberately avoids
+            // entirely (see the class-level note in build()).
+            'Page No : 1',
             style: pw.TextStyle(fontSize: 7, fontStyle: pw.FontStyle.italic),
           ),
         ),
