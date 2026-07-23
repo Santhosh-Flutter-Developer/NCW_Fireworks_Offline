@@ -585,9 +585,12 @@ class QuotationRepository {
     throw ApiRequestException(result.message);
   }
 
-  /// Deletes/cancels a quotation. The server decides which based on its
-  /// own `drafted` flag: a draft is permanently deleted, anything else is
-  /// marked cancelled (soft-void).
+  /// Deletes/cancels a quotation via the live `delete_quotation_id`
+  /// call. No longer called anywhere in the normal flow — both Draft
+  /// and Active Cancel now go through the offline-first
+  /// [queueQuotationForSync] path instead (see
+  /// `QuotationController.deleteQuotation`). Kept only as a
+  /// backward-compat fallback.
   Future<QuotationDeleteResponseModel> deleteQuotation({
     required String quotationId,
   }) async {
