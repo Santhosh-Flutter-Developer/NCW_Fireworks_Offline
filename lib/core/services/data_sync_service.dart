@@ -348,7 +348,19 @@ class DataSyncService extends GetxService {
     await _cache.putJsonList(CacheKeys.quotationProducts, allProducts);
   }
 
+  /// Pushes anything in the pending-sync queue to `estimate.php` in one
+  /// batch first — same reasoning as [_syncQuotations]: queued adds/edits
+  /// (including an offline Cancel) go out, and only once that succeeds
+  /// (or there was nothing queued) does the estimate list get re-pulled
+  /// and re-cached. If the push fails, this throws and the pull below
+  /// never runs — [_runStep]/[_syncOne] catch it, and the queue is left
+  /// intact for the next Sync attempt.
   Future<void> _syncEstimations() async {
+    final creator = _sessionService.currentSession.value?.userId;
+    if (creator != null && creator.isNotEmpty) {
+      await _estimateRepository.syncPendingEstimates(creator: creator);
+    }
+
     final agents = <String, Map<String, dynamic>>{};
     final parties = <String, Map<String, dynamic>>{};
 
@@ -363,6 +375,10 @@ class DataSyncService extends GetxService {
         drafted: drafted,
         cancelled: cancelled,
       );
+      // Cache every field `estimate_listing` gives us (not just the
+      // id/number/date/agent/party/qty/total summary) so editing a
+      // synced estimate later works entirely offline — see the `_full`
+      // marker in `EstimateListItem.fromJson`.
       final items = result.items
           .map((e) => {
                 'estimate_id': e.estimateId,
@@ -373,6 +389,34 @@ class DataSyncService extends GetxService {
                 'total_quantity': e.totalQuantity,
                 'grand_total': e.grandTotal,
                 'receipt_id': e.receiptId,
+                'party_id': e.partyId,
+                'agent_id': e.agentId,
+                'pricelist_id': e.pricelistId,
+                'pricelist_name': e.pricelistName,
+                'convert_quotation_id': e.convertQuotationId,
+                'product_id': e.products.map((p) => p.productId).join(','),
+                'product_name': e.products.map((p) => p.productName).join(','),
+                'product_quantity':
+                    e.products.map((p) => p.quantity).join(','),
+                'unit_id': e.products.map((p) => p.unitId).join(','),
+                'unit_name': e.products.map((p) => p.unitName).join(','),
+                'product_rate': e.products.map((p) => p.rate).join(','),
+                'product_discount':
+                    e.products.map((p) => p.productDiscount).join(','),
+                'product_amount': e.products.map((p) => p.amount).join(','),
+                'section1_add_value': e.section1AddValue,
+                'section1_discount': e.section1Discount,
+                'section2_add_value': e.section2AddValue,
+                'section2_discount': e.section2Discount,
+                'other_charges_id':
+                    e.charges.map((c) => c.chargeId).join(','),
+                'other_charges_name':
+                    e.charges.map((c) => c.chargeName).join(','),
+                'other_charges_type': e.charges.map((c) => c.type).join(','),
+                'other_charges_value':
+                    e.charges.map((c) => c.value).join(','),
+                'drafted': e.isDraft ? '1' : '0',
+                '_full': true,
               })
           .toList();
       for (final a in result.agentList) {
@@ -395,6 +439,60 @@ class DataSyncService extends GetxService {
         CacheKeys.estimationAgents, agents.values.toList());
     await _cache.putJsonList(
         CacheKeys.estimationParties, parties.values.toList());
+
+    await _syncEstimateCatalogue();
+  }
+
+  /// Refreshes the pricelist dropdown, the full per-pricelist product
+  /// catalogue, and the other-charges dropdown (each charge's fixed
+  /// "Plus"/"Minus" type resolved once here) that the Add/Edit Estimate
+  /// form reads offline (`EstimateRepository.cachedPricelists`/
+  /// `cachedProductsForPricelist`/`cachedOtherCharges`). Mirrors
+  /// [_syncQuotationCatalogue] — one call for the pricelist + other-
+  /// charges lists, then one call per pricelist for its products, then
+  /// one call per other-charge for its type.
+  Future<void> _syncEstimateCatalogue() async {
+    _announce('Syncing estimate product catalogue');
+    final init = await _estimateRepository.getFormInitData();
+    await _cache.putJsonList(
+      CacheKeys.estimationPricelists,
+      init.pricelist.map((p) => {'id': p.id, 'name': p.name}).toList(),
+    );
+
+    final allProducts = <Map<String, dynamic>>[];
+    for (final pricelist in init.pricelist) {
+      final result =
+          await _estimateRepository.getProductsForPricelist(pricelist.id);
+      allProducts.addAll(result.products.map((p) => {
+            'pricelist_id': pricelist.id,
+            'product_id': p.productId,
+            'product_name': p.productName,
+            'unit_id': p.unitId,
+            'unit_name': p.unitName,
+            'rate': p.rate,
+            'product_discount': p.productDiscount ? '1' : '0',
+            'current_stock': p.currentStock,
+          }));
+    }
+    await _cache.putJsonList(CacheKeys.estimationProducts, allProducts);
+
+    final chargeRows = <Map<String, dynamic>>[];
+    for (final charge in init.otherCharges) {
+      String type = 'Plus';
+      try {
+        final typeResult = await _estimateRepository.getChargeType(charge.id);
+        type = typeResult.chargesType;
+      } catch (_) {
+        // Keep the default "Plus" rather than failing the whole sync
+        // over one charge's type lookup.
+      }
+      chargeRows.add({
+        'other_charges_id': charge.id,
+        'other_charges_name': charge.name,
+        'charges_type': type,
+      });
+    }
+    await _cache.putJsonList(CacheKeys.estimationOtherCharges, chargeRows);
   }
 
   Future<void> _syncReceipts() async {

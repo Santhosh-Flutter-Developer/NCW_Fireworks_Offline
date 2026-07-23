@@ -64,6 +64,27 @@ class EstimationModel {
 
   String receiptId;
 
+  /// The source quotation's id when this estimate was created via
+  /// "Convert to Estimate" — sent back as `convert_quotation_id` on save.
+  /// Empty otherwise.
+  String convertQuotationId;
+
+  /// True when this row was built from the on-device pending-sync queue
+  /// — an add/edit made on this device that hasn't been sent to
+  /// `estimate.php` yet. Drives the "Pending sync" badge on the list.
+  bool isPending;
+
+  /// The pending-sync queue entry's own id, when [isPending] is true —
+  /// used to update/remove that exact entry on a later edit or delete.
+  /// Null for a row that came from the synced server cache.
+  String? localId;
+
+  /// Whether every field on this row (party/pricelist/agent/items/
+  /// sections/charges) is actually known — false only for a row cached
+  /// before full details were stored, which needs a `show_estimate_id`
+  /// fetch before it's safe to edit (see `EstimationController.startEdit`).
+  bool hasFullDetails;
+
   EstimationModel({
     required this.id,
     required this.estimationNo,
@@ -87,6 +108,10 @@ class EstimationModel {
     this.serverGrandTotal,
     this.serverQtyLabel,
     this.receiptId = "",
+    this.convertQuotationId = '',
+    this.isPending = false,
+    this.localId,
+    this.hasFullDetails = true,
   }) : charges = charges ?? [];
 
   bool get isConverted => receiptId.isNotEmpty;

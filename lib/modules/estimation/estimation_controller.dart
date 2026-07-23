@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/constants/api_endpoints.dart';
 import '../../core/network/api_exception.dart';
 import '../../core/services/session_service.dart';
+import '../../core/utils/id_generator.dart';
 import '../../data/models/billing_item_model.dart';
 import '../../data/models/estimate/estimate_product_list_response_model.dart';
 import '../../data/models/estimate/id_name.dart';
@@ -71,6 +72,12 @@ class EstimationController extends GetxController {
   /// product's rate/unit has actually been fetched.
   final _stockCache = <String, int>{};
   int stockFor(String productId) => _stockCache[productId] ?? 0;
+
+  /// Each cached other-charge's fixed "Plus"/"Minus" type (see
+  /// `EstimateRepository.cachedOtherCharges`) — populated whenever
+  /// dropdown data is loaded from cache, read by [addCharge] instead of a
+  /// live `type_other_charges_id` call.
+  final _chargeTypeById = <String, String>{};
 
   // ---- List screen state -------------------------------------------------
   final estimations = <EstimationModel>[].obs;
@@ -251,25 +258,83 @@ class EstimationController extends GetxController {
       estimations.assignAll(result.items.map((item) {
         DateTime date;
         try {
-          date = _serverStoredDateFormat.parse(item.estimateDate);
+          // Pending (not-yet-synced) rows are stored as dd-MM-yyyy (see
+          // EstimateRepository.queueEstimateForSync); synced rows come
+          // back from the server as yyyy-MM-dd. Picking the format
+          // directly by [item.isPending] avoids the bug where
+          // DateFormat('yyyy-MM-dd').parse(...) — the *lenient* parse,
+          // not parseStrict — silently "succeeds" on a dd-MM-yyyy string
+          // by reinterpreting its digit groups as year/month/day in the
+          // wrong order (e.g. "21-07-2026" misread as year 21, causing
+          // the day component to overflow into a garbage date), instead
+          // of throwing and falling through to the correct format.
+          date = item.isPending
+              ? _apiDateFormat.parseStrict(item.estimateDate)
+              : _serverStoredDateFormat.parseStrict(item.estimateDate);
         } catch (_) {
-          date = DateTime.now();
+          try {
+            date = _apiDateFormat.parseStrict(item.estimateDate);
+          } catch (_) {
+            try {
+              date = _serverStoredDateFormat.parseStrict(item.estimateDate);
+            } catch (_) {
+              date = DateTime.now();
+            }
+          }
         }
         final party = _stripHtml(item.partyNameMobileCity).trim();
         final agent = _stripHtml(item.agentNameMobileCity).trim();
+        final knownFullDetails = item.isPending || item.hasFullDetails;
         return EstimationModel(
-            id: item.estimateId,
+            id: item.isPending ? item.localId : item.estimateId,
             estimationNo: item.estimateNumber,
-            serverEstimateId: item.estimateId,
-            partyId: '',
+            serverEstimateId: item.estimateId.isEmpty ? null : item.estimateId,
+            partyId: item.partyId,
             partyName: party.isEmpty ? 'Direct' : party,
+            agentId: item.agentId,
             agentName: agent.isEmpty ? 'Direct' : agent,
+            pricelistId: item.pricelistId,
+            pricelistName: item.pricelistName,
             date: date,
-            items: const [],
+            items: item.products
+                .map((p) => BillingItemModel(
+                      productId: p.productId,
+                      productName: p.productName,
+                      quantity: int.tryParse(p.quantity) ?? 1,
+                      rate: double.tryParse(p.rate) ?? 0,
+                      unit: p.unitName,
+                      unitId: p.unitId,
+                      section: p.productDiscount == '1' ? 1 : 2,
+                    ))
+                .toList(),
             status: rowStatus,
-            serverGrandTotal: item.grandTotal,
-            serverQtyLabel: item.totalQuantity,
-            receiptId: item.receiptId);
+            section1Add: double.tryParse(item.section1AddValue) ?? 0,
+            section1Discount: double.tryParse(item.section1Discount) ?? 0,
+            section2Add: double.tryParse(item.section2AddValue) ?? 0,
+            section2Discount: double.tryParse(item.section2Discount) ?? 0,
+            charges: item.charges
+                .map((c) => ChargeLine(
+                      name: c.chargeName,
+                      value: c.type == 'Minus'
+                          ? -(double.tryParse(c.value) ?? 0).abs()
+                          : (double.tryParse(c.value) ?? 0).abs(),
+                      chargeId: c.chargeId,
+                      type: c.type.isEmpty ? 'Plus' : c.type,
+                    ))
+                .toList(),
+            // A pending row's total/qty aren't known server-side yet —
+            // let EstimationModel derive them from its own items instead
+            // of reading a stale/zero server value.
+            serverGrandTotal: item.isPending ? null : item.grandTotal,
+            serverQtyLabel: item.isPending ? null : item.totalQuantity,
+            receiptId: item.receiptId,
+            convertQuotationId: item.convertQuotationId,
+            isPending: item.isPending,
+            localId: item.isPending ? item.localId : null,
+            // A row cached by an older build of this app only has the
+            // summary fields — not safe to re-save without fetching the
+            // rest first (see EstimationController.startEdit).
+            hasFullDetails: knownFullDetails);
       }));
 
       // Prefer the known total row count derived from the last sync (see
@@ -369,32 +434,129 @@ class EstimationController extends GetxController {
 
   void toggleViewMode(bool table) => isTableView.value = table;
 
-  /// Cancels an active estimate (server sets `cancelled = 1`) or, for a
-  /// draft row, permanently deletes it (server sets `deleted = 1`) — the
-  /// same `delete_estimate_id` call does either, decided server-side by
-  /// the estimate's own `drafted` flag.
+  /// Whether the server has ever confirmed [estimation] — false only for
+  /// one still sitting purely in the pending-sync queue, never yet sent.
+  /// A pending *edit* of an already-synced estimate still counts as
+  /// known, since cancelling it means queuing a `cancelled: "1"` update
+  /// for that existing estimate, not just dropping local state. Used by
+  /// the list view to show accurate confirm-dialog text for
+  /// [deleteEstimation].
+  bool isKnownToServer(EstimationModel estimation) {
+    final estimateId =
+        estimation.serverEstimateId ?? estimation.localId ?? estimation.id;
+    return estimateId.isNotEmpty &&
+        _estimateRepository.existsInSyncedCache(estimateId);
+  }
+
+  /// Cancels a confirmed (non-draft) estimate, or permanently deletes a
+  /// draft — mirrors the server's own `delete_estimate_id` rule based on
+  /// the estimate's `drafted` flag.
+  ///
+  /// Cancel is offline-first, just like Add/Edit: cancelling an estimate
+  /// the server already knows about queues a `cancelled: "1"` update in
+  /// the same pending-sync batch (see
+  /// [EstimateRepository.queueEstimateForSync]) and moves it to the
+  /// Cancel tab immediately — only a Sync tap actually tells the server.
+  /// Deleting a draft still needs the live `delete_estimate_id` call
+  /// (unchanged — permanent delete isn't part of the offline Cancel
+  /// flow). Either way, an estimate the server has never confirmed
+  /// (still only in the pending-sync queue) just has its queue entry
+  /// dropped — there's nothing server-side yet to cancel or delete.
   Future<void> deleteEstimation(EstimationModel estimation) async {
-    final id = estimation.serverEstimateId ?? estimation.id;
+    final id = estimation.serverEstimateId ?? estimation.localId ?? estimation.id;
+    final knownToServer = isKnownToServer(estimation);
+
+    if (estimation.isPending && !knownToServer) {
+      estimations.remove(estimation);
+      if (estimation.localId != null) {
+        await _estimateRepository.removePendingEstimate(estimation.localId!);
+      }
+      Get.snackbar(
+        'Removed from view',
+        '${estimation.estimationNo.isEmpty ? "This estimate" : estimation.estimationNo} was removed before it was ever synced.',
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return;
+    }
+
     if (id.isEmpty) {
       estimations.remove(estimation);
       return;
     }
+
     final isDraft = estimation.status == DocStatus.draft;
-    try {
-      final result = await _estimateRepository.deleteEstimate(estimateId: id);
-      Get.snackbar(
-        isDraft ? 'Draft deleted' : 'Estimate cancelled',
-        result.message,
-        snackPosition: SnackPosition.BOTTOM,
-      );
-      await loadEstimates();
-    } on ApiRequestException catch (e) {
-      Get.snackbar('Could not delete', e.message,
-          snackPosition: SnackPosition.BOTTOM);
-    } on ApiException catch (e) {
-      Get.snackbar('Could not delete', e.message,
-          snackPosition: SnackPosition.BOTTOM);
+    if (isDraft) {
+      try {
+        final result = await _estimateRepository.deleteEstimate(estimateId: id);
+        Get.snackbar('Draft deleted', result.message,
+            snackPosition: SnackPosition.BOTTOM);
+        await loadEstimates();
+      } on ApiRequestException catch (e) {
+        Get.snackbar('Could not delete', e.message,
+            snackPosition: SnackPosition.BOTTOM);
+      } on ApiException catch (e) {
+        Get.snackbar('Could not delete', e.message,
+            snackPosition: SnackPosition.BOTTOM);
+      }
+      return;
     }
+
+    // Confirmed estimate known to the server — cancel offline. Queues
+    // the same full row a save would (so an edit already sitting in the
+    // queue, not yet synced, is updated in place rather than
+    // duplicated), just with `cancelled` added.
+    await _estimateRepository.queueEstimateForSync(
+      localId: id,
+      editId: id,
+      estimateNumber: estimation.estimationNo,
+      convertQuotationId: estimation.convertQuotationId,
+      drafted: '0',
+      cancelled: true,
+      estimateDate: _apiDateFormat.format(estimation.date),
+      pricelistId: estimation.pricelistId,
+      pricelistName: estimation.pricelistName,
+      agentId: estimation.agentId,
+      agentName: estimation.agentName,
+      partyId: estimation.partyId,
+      partyName: estimation.partyName,
+      products: estimation.items
+          .map((i) => {
+                'product_id': i.productId,
+                'product_name': i.productName,
+                'unit_id': i.unitId,
+                'unit_name': i.unit,
+                'product_quantity': i.quantity.toString(),
+                'product_rate': i.rate.toString(),
+                'product_discount': i.section == 1 ? '1' : '0',
+              })
+          .toList(),
+      section1AddValue:
+          estimation.section1Add == 0 ? '' : estimation.section1Add.toString(),
+      section1Discount: estimation.section1Discount == 0
+          ? ''
+          : estimation.section1Discount.toString(),
+      section2AddValue:
+          estimation.section2Add == 0 ? '' : estimation.section2Add.toString(),
+      section2Discount: estimation.section2Discount == 0
+          ? ''
+          : estimation.section2Discount.toString(),
+      charges: estimation.charges
+          .map((c) => EstimateChargeLine(
+                chargeId: c.chargeId,
+                type: c.type,
+                value: c.value.abs().toString(),
+                name: c.name,
+              ))
+          .toList(),
+    );
+
+    estimations.remove(estimation);
+    Get.snackbar(
+      'Cancelled offline',
+      'Will be sent to the server next time you Sync.',
+      snackPosition: SnackPosition.BOTTOM,
+    );
+    await loadEstimates();
   }
 
   // ---- Print / download report PDF ----------------------------------------
@@ -484,9 +646,12 @@ class EstimationController extends GetxController {
 
   // ---- Form: charges --------------------------------------------------------
 
-  /// Looks up whether the chosen other-charge is added or deducted (via
-  /// `type_other_charges_id`), then adds it with the server-determined
-  /// sign — mirrors the "Charges: Select / Value / +" row on the web app.
+  /// Adds the chosen other-charge with its "Plus"/"Minus" sign. Normally
+  /// read straight from [_chargeTypeById] (cached offline — see
+  /// [_loadDropdownDataFromCache]) with no network call; only falls back
+  /// to a live `type_other_charges_id` lookup when the charge type isn't
+  /// cached, which only happens on the legacy `_loadFormInit` fallback
+  /// path (see its doc comment).
   Future<void> addCharge(double rawValue) async {
     final chargeId = selectedChargeId.value;
     if (chargeId == null || rawValue == 0) {
@@ -498,25 +663,33 @@ class EstimationController extends GetxController {
         otherChargesOptions.firstWhereOrNull((c) => c.id == chargeId);
     if (option == null) return;
 
-    try {
-      final typeResult = await _estimateRepository.getChargeType(chargeId);
-      final signedValue =
-          typeResult.chargesType == 'Minus' ? -rawValue.abs() : rawValue.abs();
-      charges.add(ChargeLine(
-        name: option.name,
-        value: signedValue,
-        chargeId: chargeId,
-        type: typeResult.chargesType,
-      ));
-      selectedChargeId.value = null;
-      chargeValueCtrl.clear();
-    } on ApiRequestException catch (e) {
-      Get.snackbar('Could not add charge', e.message,
-          snackPosition: SnackPosition.BOTTOM);
-    } on ApiException catch (e) {
-      Get.snackbar('Could not add charge', e.message,
-          snackPosition: SnackPosition.BOTTOM);
+    String type;
+    final cachedType = _chargeTypeById[chargeId];
+    if (cachedType != null) {
+      type = cachedType;
+    } else {
+      try {
+        type = (await _estimateRepository.getChargeType(chargeId)).chargesType;
+      } on ApiRequestException catch (e) {
+        Get.snackbar('Could not add charge', e.message,
+            snackPosition: SnackPosition.BOTTOM);
+        return;
+      } on ApiException catch (e) {
+        Get.snackbar('Could not add charge', e.message,
+            snackPosition: SnackPosition.BOTTOM);
+        return;
+      }
     }
+
+    final signedValue = type == 'Minus' ? -rawValue.abs() : rawValue.abs();
+    charges.add(ChargeLine(
+      name: option.name,
+      value: signedValue,
+      chargeId: chargeId,
+      type: type,
+    ));
+    selectedChargeId.value = null;
+    chargeValueCtrl.clear();
   }
 
   void removeCharge(int index) => charges.removeAt(index);
@@ -535,24 +708,18 @@ class EstimationController extends GetxController {
     selectedAgent.value = agent?.name;
   }
 
+  /// Products offered under the selected pricelist, for the "Add Item"
+  /// picker — read straight from the offline catalogue [DataSyncService]
+  /// caches at login/Sync (`EstimateRepository.cachedProductsForPricelist`).
+  /// No network call, online or off.
   Future<void> loadProductsForSelectedPricelist() async {
     final pricelistId = selectedPricelistId.value;
     if (pricelistId == null || pricelistId.isEmpty) {
       productOptions.clear();
       return;
     }
-    isLoadingProducts.value = true;
-    try {
-      final result =
-          await _estimateRepository.getProductsForPricelist(pricelistId);
-      productOptions.assignAll(result.products);
-    } on ApiException catch (e) {
-      productOptions.clear();
-      Get.snackbar('Could not load products', e.message,
-          snackPosition: SnackPosition.BOTTOM);
-    } finally {
-      isLoadingProducts.value = false;
-    }
+    productOptions.assignAll(
+        _estimateRepository.cachedProductsForPricelist(pricelistId));
   }
 
   // ---- Form: create / edit bootstrap ------------------------------------
@@ -580,23 +747,124 @@ class EstimationController extends GetxController {
     editingEstimation = null;
     _convertQuotationId = null;
     _resetFormFields();
-    isLoadingForm.value = true;
-    _loadFormInit(showEstimateId: '');
+    _loadDropdownDataFromCache();
+    if (pricelistOptions.isNotEmpty) {
+      // New estimate — default to the first pricelist, matching the web
+      // app's Add Estimate screen.
+      selectedPricelistId.value = pricelistOptions.first.id;
+      selectedPricelist.value = pricelistOptions.first.name;
+      loadProductsForSelectedPricelist();
+    }
+    _syncMoneyControllers();
   }
 
+  /// Opens the Edit form for [estimation]. The offline cache now carries
+  /// every field `estimate_listing` returns (see `DataSyncService`/
+  /// `EstimateListItem`), and every pending (not-yet-synced) row is fully
+  /// known too — so this populates the form directly and works with no
+  /// network call at all in the normal case. The `show_estimate_id` fetch
+  /// below only ever runs for a row cached by an older build of this app
+  /// (before full details were stored) that hasn't been refreshed by a
+  /// sync yet; it's a one-time fallback, not something the offline-first
+  /// flow depends on.
   void startEdit(EstimationModel estimation) {
     editingEstimation = estimation;
-    _convertQuotationId = null;
+    _convertQuotationId =
+        estimation.convertQuotationId.isEmpty ? null : estimation.convertQuotationId;
     _resetFormFields();
+    _loadDropdownDataFromCache();
     estimationDate.value = estimation.date;
+
+    if (estimation.hasFullDetails) {
+      _populateFormFromModel(estimation);
+      return;
+    }
+
     isLoadingForm.value = true;
     _loadFormInit(showEstimateId: estimation.serverEstimateId ?? estimation.id);
+  }
+
+  /// Loads pricelist/agent/party/other-charges dropdown options from the
+  /// offline cache that [DataSyncService] refreshes at login and via
+  /// Sync — no network call.
+  void _loadDropdownDataFromCache() {
+    pricelistOptions.assignAll(_estimateRepository.cachedPricelists());
+    agentOptions.assignAll(_estimateRepository.cachedAgents());
+    parties.assignAll(_estimateRepository.cachedParties().map((p) => PartyModel(
+          id: p.id,
+          serverPartyId: p.id,
+          name: p.name.isEmpty ? 'Untitled Party' : p.name,
+          hasFullDetails: false,
+        )));
+    final cachedCharges = _estimateRepository.cachedOtherCharges();
+    otherChargesOptions
+        .assignAll(cachedCharges.map((c) => IdName(id: c.id, name: c.name)));
+    _chargeTypeById
+      ..clear()
+      ..addEntries(cachedCharges.map((c) => MapEntry(c.id, c.type)));
+  }
+
+  /// Populates the form directly from [estimation]'s own fields — used
+  /// whenever [estimation] already has full details (every pending row,
+  /// and every row synced since this app started caching full details).
+  void _populateFormFromModel(EstimationModel estimation) {
+    if (estimation.pricelistId.isNotEmpty) {
+      selectedPricelistId.value = estimation.pricelistId;
+      final pl = pricelistOptions
+          .firstWhereOrNull((p) => p.id == estimation.pricelistId);
+      selectedPricelist.value = pl?.name ??
+          (estimation.pricelistName.isEmpty ? null : estimation.pricelistName);
+    }
+    if (estimation.agentId.isNotEmpty) {
+      selectedAgentId.value = estimation.agentId;
+      final ag =
+          agentOptions.firstWhereOrNull((a) => a.id == estimation.agentId);
+      selectedAgent.value = ag?.name ?? estimation.agentName;
+    }
+    if (estimation.partyId.isNotEmpty) {
+      selectedParty.value = parties
+              .firstWhereOrNull((p) => p.serverPartyId == estimation.partyId) ??
+          PartyModel(
+            id: estimation.partyId,
+            serverPartyId: estimation.partyId,
+            name: estimation.partyName,
+            hasFullDetails: false,
+          );
+    }
+
+    formItems.assignAll(estimation.items
+        .map((i) => BillingItemModel(
+              productId: i.productId,
+              productName: i.productName,
+              quantity: i.quantity,
+              rate: i.rate,
+              unit: i.unit,
+              unitId: i.unitId,
+              section: i.section,
+            ))
+        .toList());
+
+    section1Add.value = estimation.section1Add;
+    section1Discount.value = estimation.section1Discount;
+    section2Add.value = estimation.section2Add;
+    section2Discount.value = estimation.section2Discount;
+    charges.assignAll(estimation.charges);
+    _syncMoneyControllers();
+
+    if (selectedPricelistId.value != null &&
+        selectedPricelistId.value!.isNotEmpty) {
+      loadProductsForSelectedPricelist();
+    }
   }
 
   /// Bootstraps a brand-new Add Estimate form pre-filled from an active
   /// quotation's own party/pricelist/agent/products — the "Convert to
   /// Estimate" action on the Quotation list. [quotationId] is kept and
-  /// sent back as `convert_quotation_id` when the form is saved.
+  /// sent back as `convert_quotation_id` when the form is saved. Still
+  /// goes through the live `show_estimate_id`/`convert_quotation_id` call
+  /// below — converting only makes sense for a quotation the server
+  /// already knows about (see `QuotationController.convertToEstimate`),
+  /// so there's already a real network round trip involved either way.
   void startConvertFromQuotation(String quotationId) {
     editingEstimation = null;
     _convertQuotationId = quotationId;
@@ -614,10 +882,13 @@ class EstimationController extends GetxController {
     }
   }
 
-  /// Bootstraps the Add/Edit Estimate form via `show_estimate_id`:
-  /// dropdown data always, plus the existing estimate's own fields when
-  /// [showEstimateId] resolves to a real record, or a source quotation's
-  /// fields when [convertQuotationId] is supplied instead.
+  /// Bootstraps the Add/Edit Estimate form via `show_estimate_id` — a
+  /// one-time backward-compat fallback for a row cached before this app
+  /// version started storing full details (see
+  /// `EstimateListItem.hasFullDetails`), and the path "Convert to
+  /// Estimate" always uses (see [startConvertFromQuotation]). The normal
+  /// offline-first Add/Edit path is [_loadDropdownDataFromCache] +
+  /// [_populateFormFromModel], which never touches the network.
   Future<void> _loadFormInit({
     required String showEstimateId,
     String convertQuotationId = '',
@@ -637,6 +908,9 @@ class EstimationController extends GetxController {
             hasFullDetails: false,
           )));
       otherChargesOptions.assignAll(result.otherCharges);
+      // The init endpoint doesn't return each charge's type — resolved
+      // lazily by [addCharge] instead when this fallback path is in use.
+      _chargeTypeById.clear();
 
       final detail = result.detail;
       if (detail != null) {
@@ -714,9 +988,12 @@ class EstimationController extends GetxController {
 
   // ---- Form: line items ---------------------------------------------------
 
-  /// Adds [productId] to the form. Looks up its rate/unit/stock/section
-  /// for the currently selected pricelist via `selected_product_id` —
-  /// `product_pricelist_id` (used to list products) only returns id+name.
+  /// Adds [productId] to the form. Rate/unit/stock/section come straight
+  /// from [productOptions] — already loaded for the selected pricelist by
+  /// [loadProductsForSelectedPricelist], and `product_pricelist_id`
+  /// returns rate/unit/discount-flag/stock for every product already, so
+  /// no second `selected_product_id` round-trip is needed (or possible
+  /// offline).
   Future<void> addProductById({
     required String productId,
     required String productName,
@@ -729,39 +1006,36 @@ class EstimationController extends GetxController {
           snackPosition: SnackPosition.BOTTOM);
       return;
     }
-    try {
-      final detail = await _estimateRepository.getSelectedProductDetail(
+
+    final option =
+        productOptions.firstWhereOrNull((p) => p.productId == productId);
+    if (option == null) {
+      Get.snackbar('Not available',
+          'This product isn\'t available under the selected pricelist',
+          snackPosition: SnackPosition.BOTTOM);
+      return;
+    }
+    _stockCache[productId] = option.currentStock;
+
+    // Matches the server's own rule for which totals section a line
+    // lands in once saved (see estimate.php's `product_discount` check).
+    final section = option.productDiscount ? 1 : 2;
+
+    final existingIndex = formItems
+        .indexWhere((i) => i.productId == productId && i.section == section);
+    if (existingIndex >= 0) {
+      formItems[existingIndex].quantity += qty;
+      formItems.refresh();
+    } else {
+      formItems.add(BillingItemModel(
         productId: productId,
-        pricelistId: pricelistId,
-      );
-      _stockCache[productId] = detail.currentStock;
-
-      // Matches the server's own rule for which totals section a line
-      // lands in once saved (see estimate.php's `product_discount` check).
-      final section = detail.productDiscount ? 1 : 2;
-
-      final existingIndex = formItems
-          .indexWhere((i) => i.productId == productId && i.section == section);
-      if (existingIndex >= 0) {
-        formItems[existingIndex].quantity += qty;
-        formItems.refresh();
-      } else {
-        formItems.add(BillingItemModel(
-          productId: productId,
-          productName: productName,
-          quantity: qty,
-          rate: detail.rate,
-          unit: detail.unitName.isEmpty ? 'Pcs' : detail.unitName,
-          unitId: detail.unitId,
-          section: section,
-        ));
-      }
-    } on ApiRequestException catch (e) {
-      Get.snackbar('Could not add product', e.message,
-          snackPosition: SnackPosition.BOTTOM);
-    } on ApiException catch (e) {
-      Get.snackbar('Could not add product', e.message,
-          snackPosition: SnackPosition.BOTTOM);
+        productName: productName.isEmpty ? option.productName : productName,
+        quantity: qty,
+        rate: option.rate,
+        unit: option.unitName.isEmpty ? 'Pcs' : option.unitName,
+        unitId: option.unitId,
+        section: section,
+      ));
     }
   }
 
@@ -888,24 +1162,36 @@ class EstimationController extends GetxController {
 
   // ---- Form: save -----------------------------------------------------------
 
+  /// Saves the form. This is offline-only, always — draft or a real
+  /// confirm both save straight to this device and never call
+  /// `estimate.php` directly, whether or not the internet happens to be
+  /// available right now. Every save (either kind) is queued in
+  /// [CacheKeys.estimationPending] via
+  /// [EstimateRepository.queueEstimateForSync]; only a manual tap of the
+  /// Sync button (see [DataSyncService]) ever sends that queue to the
+  /// server, in one batch.
   Future<bool> save({required bool asDraft}) async {
     if (isSaving.value) return false;
 
-    if (selectedParty.value == null) {
-      Get.snackbar('Missing party', 'Please select a party',
-          snackPosition: SnackPosition.BOTTOM);
-      return false;
-    }
-    if (selectedPricelistId.value == null ||
-        selectedPricelistId.value!.isEmpty) {
-      Get.snackbar('Missing pricelist', 'Please select a pricelist',
-          snackPosition: SnackPosition.BOTTOM);
-      return false;
-    }
-    if (formItems.isEmpty) {
-      Get.snackbar('No items', 'Add at least one product',
-          snackPosition: SnackPosition.BOTTOM);
-      return false;
+    // The server relaxes its own validation for drafts (empty party/
+    // pricelist/items are fine) — only require them for a real submit.
+    if (!asDraft) {
+      if (selectedParty.value == null) {
+        Get.snackbar('Missing party', 'Please select a party',
+            snackPosition: SnackPosition.BOTTOM);
+        return false;
+      }
+      if (selectedPricelistId.value == null ||
+          selectedPricelistId.value!.isEmpty) {
+        Get.snackbar('Missing pricelist', 'Please select a pricelist',
+            snackPosition: SnackPosition.BOTTOM);
+        return false;
+      }
+      if (formItems.isEmpty) {
+        Get.snackbar('No items', 'Add at least one product',
+            snackPosition: SnackPosition.BOTTOM);
+        return false;
+      }
     }
 
     final session = _sessionService.currentSession.value;
@@ -915,26 +1201,73 @@ class EstimationController extends GetxController {
       return false;
     }
 
-    // estimate.php's `estimate_update` has no separate "draft" flag —
-    // every call is a real create/update. [asDraft] is kept for parity
-    // with the Draft/Confirm buttons on screen, but doesn't change the
-    // payload sent to the server.
     isSaving.value = true;
     try {
-      final result = await _estimateRepository.saveEstimate(
-        creator: session.userId,
-        editId: editingEstimation?.serverEstimateId ?? '',
+      // The server no longer assigns `estimate_id`/`estimate_number`
+      // itself — the client generates both, once, at creation: `editId`
+      // becomes the estimate's permanent id (used for every later edit,
+      // for Cancel, and for the linked Receipt), and `estimateNumber` is
+      // the printed bill number. An edit reuses both unchanged —
+      // regenerating either here would silently rename an existing
+      // estimate.
+      final String editId;
+      final String estimateNumber;
+      if (editingEstimation == null) {
+        editId = IdGenerator.generate();
+        estimateNumber = _estimateRepository.nextEstimateNumber(
+          billPrefix: session.billPrefix,
+        );
+      } else {
+        editId = editingEstimation!.serverEstimateId ??
+            editingEstimation!.localId ??
+            IdGenerator.generate();
+        estimateNumber = editingEstimation!.estimationNo.isNotEmpty
+            ? editingEstimation!.estimationNo
+            : _estimateRepository.nextEstimateNumber(
+                billPrefix: session.billPrefix,
+              );
+      }
+      // The id doubles as the pending-queue entry's key — since it's
+      // assigned once at creation and never changes, there's no separate
+      // "local-only" id to track the way Party's queue still needs one.
+      final localId = editId;
+
+      final agentName = selectedAgentId.value == null
+          ? ''
+          : (agentOptions
+                  .firstWhereOrNull((a) => a.id == selectedAgentId.value)
+                  ?.name ??
+              '');
+
+      await _estimateRepository.queueEstimateForSync(
+        localId: localId,
+        editId: editId,
+        estimateNumber: estimateNumber,
         convertQuotationId: _convertQuotationId ?? '',
+        drafted: asDraft ? '1' : '0',
         estimateDate: _apiDateFormat.format(estimationDate.value),
-        pricelistId: selectedPricelistId.value!,
+        pricelistId: selectedPricelistId.value ?? '',
+        pricelistName: selectedPricelist.value ?? '',
         agentId: selectedAgentId.value ?? '',
-        partyId: selectedParty.value!.serverPartyId ?? selectedParty.value!.id,
+        agentName: agentName,
+        partyId: selectedParty.value?.serverPartyId ??
+            selectedParty.value?.id ??
+            '',
+        partyName: selectedParty.value?.name ?? '',
         products: formItems
-            .map((i) => EstimateProductLine(
-                  productId: i.productId,
-                  quantity: i.quantity.toString(),
-                  rate: i.rate.toString(),
-                ))
+            .map((i) => {
+                  'product_id': i.productId,
+                  'product_name': i.productName,
+                  'unit_id': i.unitId,
+                  'unit_name': i.unit,
+                  'product_quantity': i.quantity.toString(),
+                  'product_rate': i.rate.toString(),
+                  // Preserves which totals section this line was in, so
+                  // re-opening this pending row for editing shows it the
+                  // same way — matches the server's own product_discount
+                  // rule, just carried locally instead of re-derived.
+                  'product_discount': i.section == 1 ? '1' : '0',
+                })
             .toList(),
         section1AddValue:
             section1Add.value == 0 ? '' : section1Add.value.toString(),
@@ -951,6 +1284,7 @@ class EstimationController extends GetxController {
                   chargeId: c.chargeId,
                   type: c.type,
                   value: c.value.abs().toString(),
+                  name: c.name,
                 ))
             .toList(),
       );
@@ -959,27 +1293,23 @@ class EstimationController extends GetxController {
       final convertedQuotationId = _convertQuotationId;
       _convertQuotationId = null;
       Get.back();
-      Get.snackbar('Saved', result.message,
-          snackPosition: SnackPosition.BOTTOM);
+      Get.snackbar(
+        wasCreate ? 'Saved offline' : 'Updated offline',
+        'Saved on this device. Tap Sync when you\'re online to send it to the server.',
+        snackPosition: SnackPosition.BOTTOM,
+      );
       if (wasCreate) currentPage.value = 1;
+      activeTab.value = asDraft ? EstimationTab.draft : EstimationTab.active;
       await loadEstimates();
-      // The quotation this estimate was converted from now has its own
-      // `estimate_id` set server-side — refresh its list (if it's alive)
-      // so the Convert/Edit/Delete actions on that row disappear.
+      // The source quotation's own "converted" flag is only stamped
+      // server-side once this estimate is actually synced — nothing to
+      // refresh on the Quotation list until then.
       if (convertedQuotationId != null &&
           convertedQuotationId.isNotEmpty &&
           Get.isRegistered<QuotationController>()) {
         unawaited(Get.find<QuotationController>().loadQuotations());
       }
       return true;
-    } on ApiRequestException catch (e) {
-      Get.snackbar('Could not save', e.message,
-          snackPosition: SnackPosition.BOTTOM);
-      return false;
-    } on ApiException catch (e) {
-      Get.snackbar('Could not save', e.message,
-          snackPosition: SnackPosition.BOTTOM);
-      return false;
     } finally {
       isSaving.value = false;
     }

@@ -54,7 +54,15 @@ class _EstimationListBody extends StatelessWidget {
       title: 'Estimate',
       actions: [
         SyncActionButton(
-          onSync: Get.find<DataSyncService>().syncEstimations,
+          // syncEstimations() only pushes/pulls the cache — it doesn't
+          // touch this screen's `estimations` list, so without reloading
+          // here the "Pending sync" badges and bill numbers would just
+          // sit there until something else (search, tab switch,
+          // re-entering the page) happened to call loadEstimates() next.
+          onSync: () async {
+            await Get.find<DataSyncService>().syncEstimations();
+            await controller.loadEstimates();
+          },
         ),
       ],
       floatingActionButton: FloatingActionButton.extended(
@@ -536,10 +544,33 @@ class _EstimationTable extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(e.partyName,
-                    style: AppTextStyles.bodyStrong,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis),
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(e.partyName,
+                          style: AppTextStyles.bodyStrong,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis),
+                    ),
+                    if (e.isPending)
+                      Container(
+                        margin: const EdgeInsets.only(left: 6),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppColors.skyBlue.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          'Pending',
+                          style: AppTextStyles.caption.copyWith(
+                            color: AppColors.skyBlue,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
                 Text('Creator : NCW Fireworks Retail',
                     style: AppTextStyles.caption),
               ],
@@ -591,6 +622,23 @@ class _EstimationTile extends StatelessWidget {
                     child: Text(estimation.estimationNo,
                         style: AppTextStyles.bodyStrong),
                   ),
+                  if (estimation.isPending)
+                    Container(
+                      margin: const EdgeInsets.only(right: 6),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppColors.skyBlue.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        'Pending sync',
+                        style: AppTextStyles.caption.copyWith(
+                          color: AppColors.skyBlue,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
                   StatusBadge(status: estimation.status),
                 ],
               ),
@@ -645,13 +693,20 @@ class _ActionIcons extends StatelessWidget {
   bool get _isCancelled => estimation.status == DocStatus.cancelled;
 
   Future<void> _confirmDelete(BuildContext context) async {
+    final neverSynced = !controller.isKnownToServer(estimation);
+    final title = neverSynced
+        ? 'Remove this?'
+        : (_isDraft ? 'Delete draft?' : 'Cancel estimate?');
+    final message = neverSynced
+        ? '${estimation.estimationNo.isEmpty ? "This estimate" : estimation.estimationNo} hasn\'t been synced yet — it will just be removed from this device.'
+        : (_isDraft
+            ? '${estimation.estimationNo} will be permanently deleted.'
+            : '${estimation.estimationNo} will be cancelled and moved to the Cancel tab — sent to the server next time you Sync.');
     final confirmed = await Get.dialog<bool>(
       AlertDialog(
         backgroundColor: AppColors.surfaceElevated,
-        title: Text(_isDraft ? 'Delete Draft?' : 'Cancel Estimate?'),
-        content: Text(_isDraft
-            ? '${estimation.estimationNo} will be permanently deleted.'
-            : '${estimation.estimationNo} will be marked as cancelled.'),
+        title: Text(title),
+        content: Text(message),
         actions: [
           TextButton(
             onPressed: () => Get.back(result: false),
@@ -659,7 +714,9 @@ class _ActionIcons extends StatelessWidget {
           ),
           TextButton(
             onPressed: () => Get.back(result: true),
-            child: Text(_isDraft ? 'Delete' : 'Cancel Estimate'),
+            child: Text(neverSynced
+                ? 'Remove'
+                : (_isDraft ? 'Delete' : 'Cancel Estimate')),
           ),
         ],
       ),
