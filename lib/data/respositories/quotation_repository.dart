@@ -174,6 +174,25 @@ class QuotationRepository {
     await _cache.putJsonList(CacheKeys.quotationPending, updated);
   }
 
+  /// Ids of quotations converted to an estimate on this device that
+  /// haven't been synced to the server yet — read straight from the
+  /// pending estimate-sync queue's own `convert_quotation_id` field
+  /// (`CacheKeys.estimationPending`, written by
+  /// `EstimateRepository.queueEstimateForSync`).
+  ///
+  /// The server only stamps a quotation's own `estimate_id` once the new
+  /// estimate is actually synced, so without this, a quotation converted
+  /// offline would still show its Convert/Edit/Delete actions until the
+  /// next Sync. [QuotationController.loadQuotations] cross-checks each
+  /// row's id against this set to hide them immediately instead — an id
+  /// here means "converted", full stop, whether or not the server knows
+  /// yet.
+  Set<String> locallyConvertedQuotationIds() => _cache
+      .getJsonList(CacheKeys.estimationPending)
+      .map((row) => row['convert_quotation_id']?.toString() ?? '')
+      .where((id) => id.isNotEmpty)
+      .toSet();
+
   /// Whether [quotationId] already exists in one of the three synced-tab
   /// caches (Active/Draft/Cancel) — i.e. the server has confirmed this
   /// quotation at least once, as opposed to one still sitting only in

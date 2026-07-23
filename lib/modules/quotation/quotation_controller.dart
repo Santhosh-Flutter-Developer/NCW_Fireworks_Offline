@@ -213,6 +213,11 @@ class QuotationController extends GetxController {
             )));
       }
 
+      // Computed once per load — cheap set lookup per row below instead
+      // of re-reading the pending estimate queue for every row.
+      final locallyConvertedIds =
+          _quotationRepository.locallyConvertedQuotationIds();
+
       quotations.assignAll(result.items.map((item) {
         DateTime date;
         try {
@@ -226,6 +231,15 @@ class QuotationController extends GetxController {
         }
         final party = item.partyNameMobileCity.trim();
         final knownFullDetails = item.isPending || item.hasFullDetails;
+        // The server only marks this quotation's own estimateId once the
+        // converted estimate is actually synced — until then, fall back
+        // to the locally-queued conversion so Convert/Edit/Delete hide
+        // straight away instead of waiting for a Sync (see
+        // `QuotationRepository.locallyConvertedQuotationIds`).
+        final ownId = item.isPending ? item.localId : item.quotationId;
+        final estimateId = item.estimateId.isNotEmpty
+            ? item.estimateId
+            : (locallyConvertedIds.contains(ownId) ? ownId : '');
         return QuotationModel(
           id: item.isPending ? item.localId : item.quotationId,
           quotationNo: item.quotationNumber,
@@ -256,7 +270,7 @@ class QuotationController extends GetxController {
           // reading a stale/zero server value.
           serverGrandTotal: item.isPending ? null : item.grandTotal,
           serverQtyLabel: item.isPending ? null : item.totalQuantity,
-          estimateId: item.estimateId,
+          estimateId: estimateId,
           isPending: item.isPending,
           localId: item.isPending ? item.localId : null,
           // A row cached by an older build of this app only has the
