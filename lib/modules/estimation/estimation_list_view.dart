@@ -694,14 +694,10 @@ class _ActionIcons extends StatelessWidget {
 
   Future<void> _confirmDelete(BuildContext context) async {
     final neverSynced = !controller.isKnownToServer(estimation);
-    final title = neverSynced
-        ? 'Remove this?'
-        : (_isDraft ? 'Delete draft?' : 'Cancel estimate?');
+    final title = neverSynced ? 'Remove this?' : 'Cancel estimate?';
     final message = neverSynced
         ? '${estimation.estimationNo.isEmpty ? "This estimate" : estimation.estimationNo} hasn\'t been synced yet — it will just be removed from this device.'
-        : (_isDraft
-            ? '${estimation.estimationNo} will be permanently deleted.'
-            : '${estimation.estimationNo} will be cancelled and moved to the Cancel tab — sent to the server next time you Sync.');
+        : '${estimation.estimationNo} will be cancelled and moved to the Cancel tab — sent to the server next time you Sync.';
     final confirmed = await Get.dialog<bool>(
       AlertDialog(
         backgroundColor: AppColors.surfaceElevated,
@@ -714,9 +710,7 @@ class _ActionIcons extends StatelessWidget {
           ),
           TextButton(
             onPressed: () => Get.back(result: true),
-            child: Text(neverSynced
-                ? 'Remove'
-                : (_isDraft ? 'Delete' : 'Cancel Estimate')),
+            child: Text(neverSynced ? 'Remove' : 'Cancel Estimate'),
           ),
         ],
       ),
@@ -765,7 +759,7 @@ class _ActionIcons extends StatelessWidget {
             ),
           if (!_isCancelled)
             IconButton(
-              tooltip: _isDraft ? 'Delete' : 'Cancel',
+              tooltip: 'Cancel',
               visualDensity: VisualDensity.compact,
               onPressed: () => _confirmDelete(context),
               icon: Icon(Icons.delete_outline_rounded,

@@ -746,10 +746,12 @@ class EstimateRepository {
     throw ApiRequestException(result.message);
   }
 
-  /// Deletes/cancels an estimate. Only ever used now for a draft's
-  /// permanent delete (see `EstimationController.deleteEstimation`) — a
-  /// confirmed estimate's Cancel is offline-first via
-  /// [queueEstimateForSync] instead.
+  /// Deletes/cancels an estimate via the live `delete_estimate_id` call.
+  /// No longer called anywhere in the normal flow — both Draft and
+  /// Active Cancel now go through the offline-first
+  /// [queueEstimateForSync] path instead (see
+  /// `EstimationController.deleteEstimation`). Kept only as a
+  /// backward-compat fallback.
   Future<EstimateDeleteResponseModel> deleteEstimate({
     required String estimateId,
   }) async {

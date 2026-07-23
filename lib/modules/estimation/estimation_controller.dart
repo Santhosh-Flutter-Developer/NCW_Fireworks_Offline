@@ -448,20 +448,19 @@ class EstimationController extends GetxController {
         _estimateRepository.existsInSyncedCache(estimateId);
   }
 
-  /// Cancels a confirmed (non-draft) estimate, or permanently deletes a
-  /// draft — mirrors the server's own `delete_estimate_id` rule based on
-  /// the estimate's `drafted` flag.
+  /// Cancels an estimate — confirmed (Active) or Draft alike — mirroring
+  /// the server's own `drafted`/`cancelled` flags.
   ///
-  /// Cancel is offline-first, just like Add/Edit: cancelling an estimate
-  /// the server already knows about queues a `cancelled: "1"` update in
-  /// the same pending-sync batch (see
-  /// [EstimateRepository.queueEstimateForSync]) and moves it to the
-  /// Cancel tab immediately — only a Sync tap actually tells the server.
-  /// Deleting a draft still needs the live `delete_estimate_id` call
-  /// (unchanged — permanent delete isn't part of the offline Cancel
-  /// flow). Either way, an estimate the server has never confirmed
-  /// (still only in the pending-sync queue) just has its queue entry
-  /// dropped — there's nothing server-side yet to cancel or delete.
+  /// Cancel is offline-first for both, just like Add/Edit: cancelling an
+  /// estimate the server already knows about queues a
+  /// `drafted: "0"` / `cancelled: "1"` update in the same pending-sync
+  /// batch (see [EstimateRepository.queueEstimateForSync]) and moves it
+  /// to the Cancel tab immediately — only a Sync tap actually tells the
+  /// server. This is the same shape whether the estimate being
+  /// cancelled was a Draft or already Active. An estimate the server has
+  /// never confirmed (still only in the pending-sync queue) just has
+  /// its queue entry dropped — there's nothing server-side yet to
+  /// cancel.
   Future<void> deleteEstimation(EstimationModel estimation) async {
     final id = estimation.serverEstimateId ?? estimation.localId ?? estimation.id;
     final knownToServer = isKnownToServer(estimation);
@@ -484,27 +483,12 @@ class EstimationController extends GetxController {
       return;
     }
 
-    final isDraft = estimation.status == DocStatus.draft;
-    if (isDraft) {
-      try {
-        final result = await _estimateRepository.deleteEstimate(estimateId: id);
-        Get.snackbar('Draft deleted', result.message,
-            snackPosition: SnackPosition.BOTTOM);
-        await loadEstimates();
-      } on ApiRequestException catch (e) {
-        Get.snackbar('Could not delete', e.message,
-            snackPosition: SnackPosition.BOTTOM);
-      } on ApiException catch (e) {
-        Get.snackbar('Could not delete', e.message,
-            snackPosition: SnackPosition.BOTTOM);
-      }
-      return;
-    }
-
-    // Confirmed estimate known to the server — cancel offline. Queues
-    // the same full row a save would (so an edit already sitting in the
-    // queue, not yet synced, is updated in place rather than
-    // duplicated), just with `cancelled` added.
+    // Known to the server — cancel offline, Draft or Active alike.
+    // Queues the same full row a save would (so an edit already sitting
+    // in the queue, not yet synced, is updated in place rather than
+    // duplicated), just with `drafted: '0'` / `cancelled: '1'` — the
+    // server's own on-cancel shape, same for a Draft or an Active
+    // estimate being cancelled.
     await _estimateRepository.queueEstimateForSync(
       localId: id,
       editId: id,
