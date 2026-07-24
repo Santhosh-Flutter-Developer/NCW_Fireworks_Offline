@@ -592,10 +592,10 @@ class _ActionIcons extends StatelessWidget {
     final confirmed = await Get.dialog<bool>(
       AlertDialog(
         backgroundColor: AppColors.surfaceElevated,
-        title: Text(isPending ? 'Cancel Receipt' : 'Delete Receipt'),
+        title: const Text('Cancel Receipt'),
         content: Text(isPending
             ? 'This receipt hasn\'t synced yet. Cancel it and un-hide the estimate\'s Receipt/Edit options?'
-            : 'Are you surely want to delete this receipt?'),
+            : 'This will cancel the receipt on the server the next time you Sync. Continue?'),
         actions: [
           TextButton(
             onPressed: () => Get.back(result: false),
@@ -603,7 +603,7 @@ class _ActionIcons extends StatelessWidget {
           ),
           TextButton(
             onPressed: () => Get.back(result: true),
-            child: Text(isPending ? 'Cancel Receipt' : 'Delete'),
+            child: const Text('Cancel Receipt'),
           ),
         ],
       ),
@@ -632,7 +632,7 @@ class _ActionIcons extends StatelessWidget {
         ),
          if (!_isCancelled)
         IconButton(
-          tooltip: receipt.isPending ? 'Cancel' : 'Delete',
+          tooltip: 'Cancel',
           visualDensity: VisualDensity.compact,
           onPressed: () => _confirmDelete(context),
           icon:

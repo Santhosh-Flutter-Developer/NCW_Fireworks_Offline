@@ -1,11 +1,12 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
+import 'package:ncw_fireworks/core/utils/pdf/estimate_pdf_builder.dart';
 import 'package:ncw_fireworks/core/utils/pdf_downloader.dart';
-import 'package:url_launcher/url_launcher.dart';
-import '../../core/constants/api_endpoints.dart';
+import 'package:printing/printing.dart';
 import '../../core/network/api_exception.dart';
 import '../../core/services/session_service.dart';
 import '../../core/utils/id_generator.dart';
@@ -16,6 +17,7 @@ import '../../data/models/estimation_model.dart';
 import '../../data/models/party_model.dart';
 import '../../data/models/quotation_model.dart';
 import '../../data/respositories/estimate_repository.dart';
+import '../../data/respositories/party_repository.dart';
 import '../../routes/app_routes.dart';
 import '../quotation/quotation_controller.dart';
 import '../receipt/receipt_controller.dart';
@@ -44,11 +46,14 @@ class EstimationController extends GetxController {
   EstimationController({
     EstimateRepository? estimateRepository,
     SessionService? sessionService,
+    PartyRepository? partyRepository,
   })  : _estimateRepository = estimateRepository ?? EstimateRepository(),
-        _sessionService = sessionService ?? Get.find<SessionService>();
+        _sessionService = sessionService ?? Get.find<SessionService>(),
+        _partyRepository = partyRepository ?? PartyRepository();
 
   final EstimateRepository _estimateRepository;
   final SessionService _sessionService;
+  final PartyRepository _partyRepository;
 
   static final DateFormat _apiDateFormat = DateFormat('dd-MM-yyyy');
   static final DateFormat _serverStoredDateFormat = DateFormat('yyyy-MM-dd');
@@ -546,46 +551,65 @@ class EstimationController extends GetxController {
 
   // ---- Print / download report PDF ----------------------------------------
 
-  /// Opens the A4 estimate report PDF in the device's browser/PDF viewer.
-  /// Print and download both point at the same report — the viewer's own
-  /// print/save controls handle each action from there.
-  Future<void> _openEstimateReport(EstimationModel estimation) async {
-    final id = estimation.serverEstimateId ?? estimation.id;
-    if (id.isEmpty) {
-      Get.snackbar('Not available', 'This estimate has no report yet',
-          snackPosition: SnackPosition.BOTTOM);
-      return;
-    }
-    final uri = ApiEndpoints.estimateReport(id);
-    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!opened) {
-      Get.snackbar('Could not open', 'Unable to open the estimate report',
-          snackPosition: SnackPosition.BOTTOM);
+  /// Builds the A4 estimate PDF entirely on-device (see
+  /// [EstimatePdfBuilder]) — no network call, so this works the same
+  /// whether or not the device is online, and whether or not this
+  /// estimate has even been synced yet.
+  Future<Uint8List> _buildEstimatePdfBytes(EstimationModel estimation) {
+    final party = _partyRepository.cachedPartyById(estimation.partyId);
+    return EstimatePdfBuilder.build(estimate: estimation, party: party);
+  }
+
+  /// Opens the native print/preview dialog for [estimation]'s A4 report.
+  Future<void> printEstimate(EstimationModel estimation) async {
+    try {
+      final bytes = await _buildEstimatePdfBytes(estimation);
+      await Printing.layoutPdf(onLayout: (_) async => bytes);
+    } catch (e, st) {
+      debugPrint('printEstimate failed: $e\n$st');
+      _showPdfErrorDialog('Could not print', e, st);
     }
   }
 
-  Future<void> printEstimate(EstimationModel estimation) =>
-      _openEstimateReport(estimation);
-
   Future<void> downloadEstimate(EstimationModel estimation) async {
-    final id = estimation.serverEstimateId ?? estimation.id;
-    if (id.isEmpty) {
-      Get.snackbar('Not available', 'This estimate has no report yet',
-          snackPosition: SnackPosition.BOTTOM);
-      return;
-    }
     try {
-      await PdfDownloader.download(
-        uri: ApiEndpoints.estimateReport(id),
-        fileName: estimation.estimationNo,
+      final bytes = await _buildEstimatePdfBytes(estimation);
+      await PdfDownloader.saveBytes(
+        bytes: bytes,
+        fileName: estimation.estimationNo.isEmpty
+            ? 'Estimate'
+            : estimation.estimationNo,
       );
       Get.snackbar('Downloaded', 'Estimate report saved',
           snackPosition: SnackPosition.BOTTOM);
-    } catch (e) {
-      Get.snackbar(
-          'Could not download', 'Unable to download the estimate report',
-          snackPosition: SnackPosition.BOTTOM);
+    } catch (e, st) {
+      debugPrint('downloadEstimate failed: $e\n$st');
+      _showPdfErrorDialog('Could not download', e, st);
     }
+  }
+
+  /// See `QuotationController._showPdfErrorDialog` — a Snackbar
+  /// truncates long text, which hid the actual exception behind a
+  /// generic message more than once; this shows the full error (and
+  /// stack trace, selectable/copyable) in a scrollable dialog instead.
+  void _showPdfErrorDialog(String title, Object error, StackTrace st) {
+    Get.dialog(
+      AlertDialog(
+        title: Text(title),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: SelectableText('$error\n\n$st'),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Get.back(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 
   // ---- Receipt shortcut -----------------------------------------------------

@@ -333,13 +333,22 @@ class ReceiptController extends GetxController {
 
   // ---- Delete ---------------------------------------------------------------
 
-  /// A synced receipt is cancelled on the server (soft-void — payment
-  /// entries reversed server-side, matches the old behaviour exactly). A
-  /// receipt still sitting in the pending-sync queue was never sent to
-  /// the server at all, so "delete" here just drops it from the queue —
-  /// entirely offline — and un-marks the source estimate's
-  /// `isConverted`, so its Receipt/Edit icons come back immediately,
-  /// since the conversion never actually happened.
+  /// Cancelling a Receipt — synced or not — is now always queued, never
+  /// a live call, the same "everything queues, only Sync sends" rule
+  /// Estimate/Quotation already follow. A receipt still only sitting in
+  /// the pending-sync queue was never sent to the server at all, so
+  /// cancelling it just flags that queue entry (see
+  /// [ReceiptRepository.cancelPendingReceipt]) and un-marks the source
+  /// estimate's `isConverted`, so its Receipt/Edit icons come back
+  /// immediately — the conversion never actually happened. A receipt the
+  /// server already knows about is queued as a *new* pending entry
+  /// carrying that receipt's real id as `edit_id` and `cancelled: true`
+  /// (see [ReceiptRepository.queueReceiptForSync]'s `knownToServer`
+  /// parameter) — it disappears from Active and reappears under Cancel
+  /// immediately, same as any other pending change, and is sent as part
+  /// of the same `receipt_data` batch call as every other queued change
+  /// on the next Sync (see [ReceiptRepository.syncPendingReceipts]) —
+  /// exactly the one-call-for-everything shape Estimate/Quotation use.
   Future<void> deleteReceipt(ReceiptModel receipt) async {
     if (receipt.isPending) {
       await _receiptRepository.cancelPendingReceipt(receipt.localId);
@@ -351,19 +360,22 @@ class ReceiptController extends GetxController {
       }
       return;
     }
-    try {
-      final result =
-          await _receiptRepository.deleteReceipt(receiptId: receipt.id);
-      Get.snackbar('Receipt cancelled', result.message,
-          snackPosition: SnackPosition.BOTTOM);
-      await loadReceipts();
-    } on ApiRequestException catch (e) {
-      Get.snackbar('Could not delete', e.message,
-          snackPosition: SnackPosition.BOTTOM);
-    } on ApiException catch (e) {
-      Get.snackbar('Could not delete', e.message,
-          snackPosition: SnackPosition.BOTTOM);
-    }
+
+    await _receiptRepository.queueReceiptForSync(
+      localId: IdGenerator.generate(),
+      editId: receipt.id,
+      receiptNumber: receipt.receiptNumber,
+      partyName: receipt.partyName,
+      agentName: receipt.agentName,
+      receiptDate: _apiDateFormat.format(receipt.date),
+      receiptDateIso: _serverStoredDateFormat.format(receipt.date),
+      totalAmount: receipt.totalAmount,
+      cancelled: true,
+      knownToServer: true,
+    );
+    Get.snackbar('Cancelled', 'This receipt will be cancelled on the server the next time you Sync.',
+        snackPosition: SnackPosition.BOTTOM);
+    await loadReceipts();
   }
 
   // ---- Print / download report PDF ------------------------------------------

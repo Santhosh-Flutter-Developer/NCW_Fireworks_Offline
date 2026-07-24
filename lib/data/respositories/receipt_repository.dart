@@ -390,17 +390,32 @@ class ReceiptRepository {
     final cacheKey =
         cancelled == '1' ? CacheKeys.receiptCancel : CacheKeys.receiptActive;
 
-    final pending = _cache
-        .getJsonList(CacheKeys.receiptPending)
+    final pendingAll = _cache.getJsonList(CacheKeys.receiptPending);
+
+    final pending = pendingAll
         .where((row) => (row['cancelled']?.toString() ?? '0') == cancelled)
         .map(ReceiptListItem.fromPendingRow)
         .toList()
         .reversed
         .toList();
 
+    // A pending cancel *of an already-synced receipt* (see
+    // `ReceiptController.deleteReceipt`'s synced branch —
+    // `queueReceiptForSync(knownToServer: true, editId: receipt.id, ...)`)
+    // has a real `edit_id` matching a row already sitting in the synced
+    // cache — without this, that same receipt would show under both
+    // Active (its stale synced copy) and Cancel (the new pending row)
+    // until the next sync catches up. Mirrors
+    // `EstimateRepository._filterCachedEstimates`'s `supersededIds`.
+    final supersededIds = pendingAll
+        .map((row) => row['edit_id']?.toString() ?? '')
+        .where((id) => id.isNotEmpty)
+        .toSet();
+
     final synced = _cache
         .getJsonList(cacheKey)
         .map(ReceiptListItem.fromJson)
+        .where((r) => !supersededIds.contains(r.receiptId))
         .toList();
 
     final all = [...pending, ...synced];
@@ -496,21 +511,43 @@ class ReceiptRepository {
   /// `receipt_data` batch (see [syncPendingReceipts]) — for a brand-new
   /// receipt this is freshly generated and doubles as [localId], the
   /// same one-id-does-both-jobs convention `EstimationController.save`
-  /// uses for a new estimate.
+  /// uses for a new estimate. To cancel a receipt the server already
+  /// knows about (see `ReceiptController.deleteReceipt`), [editId] is
+  /// instead that receipt's real server id, [localId] is a fresh id (this
+  /// is a new queue entry either way), and [cancelled] is `true` — the
+  /// `receipt_data` batch endpoint accepts `cancelled: "1"` against an
+  /// existing `edit_id` just as readily as against a brand-new one, the
+  /// same "Cancel is just another queued update, not a separate call"
+  /// convention `EstimateRepository.queueEstimateForSync` documents.
+  /// [billNumber]/[deduction]/[narration]/[entries] aren't known for an
+  /// existing receipt (the list endpoint never returns them, and this app
+  /// has no "load a receipt's full details" call) — left at their
+  /// defaults, since cancelling an existing `edit_id` shouldn't need them
+  /// resent.
+  ///
+  /// [knownToServer] says which of those two cases this is — it decides
+  /// whether [syncPendingReceipts] actually sends this row or just drops
+  /// it: `false` (the default, a brand-new receipt) means a cancel is
+  /// dropped from the queue unsent if it's never synced by the time Sync
+  /// runs, since the server never knew about it either way; `true` (a
+  /// cancel of an existing receipt) always gets sent, since there's a
+  /// real server row to update.
   Future<void> queueReceiptForSync({
     required String localId,
     required String editId,
-    required String estimateId,
+    String estimateId = '',
     required String receiptNumber,
-    required String billNumber,
-    required String partyName,
+    String billNumber = '',
+    String partyName = '',
     String agentName = 'Direct',
     required String receiptDate, // dd-MM-yyyy
     required String receiptDateIso, // yyyy-MM-dd, for offline date filters
     String deduction = '',
     String narration = '',
-    required double totalAmount,
-    required List<ReceiptPaymentEntry> entries,
+    double totalAmount = 0,
+    List<ReceiptPaymentEntry> entries = const [],
+    bool cancelled = false,
+    bool knownToServer = false,
   }) async {
     final pending = _cache.getJsonList(CacheKeys.receiptPending);
     final row = <String, dynamic>{
@@ -527,11 +564,17 @@ class ReceiptRepository {
       'narration': narration,
       'total_amount': totalAmount,
       'entries': entries.map((e) => e.toJson()).toList(),
-      // '0' = still needs to be sent to `receipt.php` on the next Sync;
-      // '1' = cancelled offline before it ever synced — see
-      // [cancelPendingReceipt] — so the next Sync just drops it from the
-      // queue instead of creating it only to immediately cancel it.
-      'cancelled': '0',
+      // '0' = still needs to be sent to `receipt.php` as a normal
+      // create/update on the next Sync; '1' = a cancel — either a
+      // brand-new receipt cancelled offline before it ever synced (see
+      // [cancelPendingReceipt], where [syncPendingReceipts] just drops it
+      // from the queue instead of creating it only to immediately cancel
+      // it), or a cancel of a receipt the server already knows about (see
+      // `ReceiptController.deleteReceipt`'s synced branch), which *does*
+      // get sent — `receipt_data`'s own `cancelled` field mirrors this
+      // one exactly.
+      'cancelled': cancelled ? '1' : '0',
+      'known_to_server': knownToServer ? '1' : '0',
     };
     final updated = [
       ...pending.where((p) => p['local_id'] != localId),
@@ -656,33 +699,47 @@ class ReceiptRepository {
       _cache.getJsonList(CacheKeys.receiptPending).length;
 
   /// Sends every queued Receipt to `receipt.php` in a single batch call —
-  /// `receipt_update` / `receipt_data: [...]`, the same
+  /// `receipt_update` / `receipt_data: [...]`, the exact
   /// one-call-for-everything shape Estimate/Quotation use (see
-  /// [EstimateRepository.syncPendingEstimates]) — never one call per
-  /// receipt. Each `receipt_data` entry carries its own `edit_id`,
-  /// `receipt_number`, `cancelled`, `receipt_date`, `against_bill_number`,
-  /// `deduction`, `narration`, and a `payment_mode_data` array of
-  /// `{payment_mode_id, bank_id, amount}` objects — not the flat parallel
-  /// `payment_mode_id[]`/`bank_id[]`/`amount[]` arrays a single-receipt
-  /// call would use. Only ever called from the Sync button (via
-  /// `DataSyncService`), and only while online.
+  /// `EstimateRepository.syncPendingEstimates`) — a normal new receipt
+  /// and a cancel of an existing one both ride in the same
+  /// `receipt_data` array, distinguished only by that row's own
+  /// `cancelled` flag, never a separate call per row and never a
+  /// separate call for cancels.
+  ///
+  /// **This requires `receipt_update` to actually act on `cancelled`.**
+  /// As shared, that field is read into a PHP variable and never
+  /// referenced again anywhere else in the handler — it doesn't gate any
+  /// SQL, doesn't touch the `deleted` column. For this to work, the
+  /// handler needs something like: when `$cancelled[$i] == '1'`, look up
+  /// the existing receipt by `edit_id` and set `deleted = 1` on it
+  /// directly — skipping the bill/payment validation entirely for that
+  /// row, since a cancel-of-existing row's `against_bill_number` and
+  /// `payment_mode_data` are sent empty (this app has no way to fetch an
+  /// existing receipt's original bill/payment details to resend them —
+  /// the list endpoint never returns them). Until that's in place, a
+  /// cancel sent this way will either no-op or fail `"Add Payment"`,
+  /// exactly as it did before this change.
   ///
   /// A receipt cancelled before it ever synced (see
-  /// [cancelPendingReceipt]) is dropped from the queue first, without
-  /// being sent at all — same as `EstimationController.deleteEstimation`
-  /// does for an estimate cancelled before the server ever knew about it.
+  /// [cancelPendingReceipt]) is still dropped from the queue first,
+  /// without being sent at all — same as
+  /// `EstimationController.deleteEstimation` does for an estimate
+  /// cancelled before the server ever knew about it; there's nothing to
+  /// tell the server, it never had this receipt either way.
   ///
-  /// On success, the whole queue is cleared — this is one atomic batch
-  /// call, not a per-row loop, so there's no partial success to track. On
-  /// failure (network error, or a business-rule rejection), the queue is
-  /// left completely untouched so nothing saved on the device is lost —
-  /// the next Sync attempt retries the same batch.
+  /// On success, the whole queue is cleared — one atomic call, not a
+  /// per-row loop, so there's no partial success to track. On failure,
+  /// the queue is left completely untouched so nothing saved on the
+  /// device is lost — the next Sync attempt retries the same batch.
   Future<void> syncPendingReceipts({required String creator}) async {
     var pending = _cache.getJsonList(CacheKeys.receiptPending);
     if (pending.isEmpty) return;
 
     final neverSyncedCancelled = pending
-        .where((r) => r['cancelled']?.toString() == '1')
+        .where((r) =>
+            r['cancelled']?.toString() == '1' &&
+            r['known_to_server']?.toString() != '1')
         .map((r) => r['local_id']?.toString() ?? '')
         .toSet();
     if (neverSyncedCancelled.isNotEmpty) {
@@ -712,7 +769,7 @@ class ReceiptRepository {
             ? row['edit_id'].toString()
             : row['local_id']?.toString() ?? '',
         'receipt_number': row['receipt_number']?.toString() ?? '',
-        'cancelled': '0',
+        'cancelled': row['cancelled']?.toString() ?? '0',
         'receipt_date': row['receipt_date']?.toString() ?? '',
         'against_bill_number': row['bill_number']?.toString() ?? '',
         'deduction': row['deduction']?.toString() ?? '',
@@ -738,9 +795,13 @@ class ReceiptRepository {
     await _cache.putJsonList(CacheKeys.receiptPending, []);
   }
 
-  /// Deletes/cancels a receipt (soft-void — payment entries are reversed
-  /// server-side). There is no "restore" — matches the Receipt list only
-  /// ever showing active rows.
+  /// Live single-receipt cancel via `delete_receipt_id`. No longer called
+  /// from [syncPendingReceipts] — cancels now ride in the same
+  /// `receipt_data` batch as everything else (see that method's doc for
+  /// why, and what the backend needs to change for it to actually take
+  /// effect). Left here in case a live single-call cancel is ever needed
+  /// again, or as a fallback if `receipt_data` cancels turn out not to be
+  /// worth pursuing server-side.
   Future<ReceiptDeleteResponseModel> deleteReceipt({
     required String receiptId,
   }) async {
