@@ -288,6 +288,29 @@ class PartyRepository {
     return null;
   }
 
+  /// Best-effort full cached details for one party by *name* instead of
+  /// id — for callers that only ever got handed a decrypted display name
+  /// (e.g. `receipt_listing`'s rows, which carry `party_name` but no
+  /// `party_id`), and so have no way to call [cachedPartyById]. Matched
+  /// case-insensitively against the same two sources, pending queue
+  /// first. Since names aren't unique the way ids are, this returns the
+  /// first match and is meant only for enriching a report's "Bill To"
+  /// block (contact/city) with best-effort detail — never for anything
+  /// that needs a guaranteed-correct single party, like an edit form.
+  PartyListItem? cachedPartyByName(String partyName) {
+    final needle = partyName.trim().toLowerCase();
+    if (needle.isEmpty) return null;
+    for (final row in _cache.getJsonList(CacheKeys.partyPending)) {
+      final item = PartyListItem.fromPendingRow(row);
+      if (item.partyName.trim().toLowerCase() == needle) return item;
+    }
+    for (final row in _cache.getJsonList(CacheKeys.party)) {
+      final item = PartyListItem.fromJson(row);
+      if (item.partyName.trim().toLowerCase() == needle) return item;
+    }
+    return null;
+  }
+
   /// Builds a page of results from whatever [DataSyncService] last cached,
   /// merged with anything still sitting in the pending-sync queue,
   /// applying the same name search the server would. There's no

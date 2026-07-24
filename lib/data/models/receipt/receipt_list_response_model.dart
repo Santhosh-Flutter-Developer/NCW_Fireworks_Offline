@@ -22,6 +22,14 @@ class ReceiptListItem {
   /// For a pending row, the queue entry's own id. Empty for a synced row.
   final String localId;
 
+  /// Remarks text and Payment Mode/Bank/Amount rows — only ever known for
+  /// a pending row (see `ReceiptModel.narration`'s doc for why a synced
+  /// row can't carry these). Used to build the offline A5 report (see
+  /// `ReceiptPdfBuilder`); `entries` uses the same shape
+  /// `ReceiptRepository.queueReceiptForSync` stores.
+  final String narration;
+  final List<Map<String, dynamic>> entries;
+
   const ReceiptListItem({
     required this.receiptId,
     required this.receiptNumber,
@@ -31,6 +39,8 @@ class ReceiptListItem {
     required this.totalAmount,
     this.isPending = false,
     this.localId = '',
+    this.narration = '',
+    this.entries = const [],
   });
 
   factory ReceiptListItem.fromJson(Map<String, dynamic> json) {
@@ -52,6 +62,7 @@ class ReceiptListItem {
   /// so this shows in the same `RE0xx/FY` shape a synced row would,
   /// rather than the source estimate's own bill number.
   factory ReceiptListItem.fromPendingRow(Map<String, dynamic> row) {
+    final rawEntries = row['entries'];
     return ReceiptListItem(
       receiptId: '',
       receiptNumber: row['receipt_number']?.toString() ?? '',
@@ -61,6 +72,10 @@ class ReceiptListItem {
       totalAmount: readNum(row['total_amount']),
       isPending: true,
       localId: row['local_id']?.toString() ?? '',
+      narration: row['narration']?.toString() ?? '',
+      entries: rawEntries is List
+          ? rawEntries.whereType<Map>().map(Map<String, dynamic>.from).toList()
+          : const [],
     );
   }
 }

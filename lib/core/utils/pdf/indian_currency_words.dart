@@ -56,6 +56,29 @@ class IndianCurrencyWords {
     return buffer.toString();
   }
 
+  /// Same conversion as [convert], but with "Rupees"/"Paise" trailing the
+  /// number instead of leading it — e.g. `1220` → `One Thousand Two
+  /// Hundred and Twenty Rupees Only`. This is the order the server's own
+  /// `getIndianCurrency()` (see `include/number2words.php`, called from
+  /// `rpt_receipt_a5.php` as `getIndianCurrency($total_amount).' Only'`)
+  /// actually uses — different from [convert]'s "Rupees-first" wording,
+  /// which only ever had to match the Quotation/Estimate reports. Kept as
+  /// a separate method rather than changing [convert] itself so those two
+  /// reports' existing wording doesn't shift.
+  static String convertTrailingRupees(double amount) {
+    final rounded = (amount.abs() * 100).round();
+    final rupees = rounded ~/ 100;
+    final paise = rounded % 100;
+
+    final rupeeWords = rupees == 0 ? 'Zero' : _convertWhole(rupees);
+    final buffer = StringBuffer('$rupeeWords Rupees');
+    if (paise > 0) {
+      buffer.write(' and ${_convertWhole(paise)} Paise');
+    }
+    buffer.write(' Only');
+    return buffer.toString();
+  }
+
   static String _convertWhole(int n) {
     if (n == 0) return '';
     if (n < 20) return _ones[n];

@@ -1,12 +1,13 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
+import 'package:ncw_fireworks/core/utils/pdf/receipt_pdf_builder.dart';
 import 'package:ncw_fireworks/core/utils/pdf_downloader.dart';
 import 'package:ncw_fireworks/modules/estimation/estimation_controller.dart';
-import 'package:url_launcher/url_launcher.dart';
-import '../../core/constants/api_endpoints.dart';
+import 'package:printing/printing.dart';
 import '../../core/network/api_exception.dart';
 import '../../core/services/session_service.dart';
 import '../../core/utils/id_generator.dart';
@@ -14,6 +15,7 @@ import '../../data/models/billing_item_model.dart';
 import '../../data/models/party_model.dart';
 import '../../data/models/receipt/id_name.dart';
 import '../../data/models/receipt_model.dart';
+import '../../data/respositories/party_repository.dart';
 import '../../data/respositories/receipt_repository.dart';
 
 /// The 2 tabs shown above the Receipt list on the web app — `receipt.php`'s
@@ -36,11 +38,14 @@ class ReceiptController extends GetxController {
   ReceiptController({
     ReceiptRepository? receiptRepository,
     SessionService? sessionService,
+    PartyRepository? partyRepository,
   })  : _receiptRepository = receiptRepository ?? ReceiptRepository(),
-        _sessionService = sessionService ?? Get.find<SessionService>();
+        _sessionService = sessionService ?? Get.find<SessionService>(),
+        _partyRepository = partyRepository ?? PartyRepository();
 
   final ReceiptRepository _receiptRepository;
   final SessionService _sessionService;
+  final PartyRepository _partyRepository;
 
   static final DateFormat _apiDateFormat = DateFormat('dd-MM-yyyy');
   static final DateFormat _serverStoredDateFormat = DateFormat('yyyy-MM-dd');
@@ -206,6 +211,30 @@ class ReceiptController extends GetxController {
         final parsedDate = DateTime.tryParse(item.receiptDate) ??
             _tryParse(_serverStoredDateFormat, item.receiptDate) ??
             DateTime.now();
+
+        // Best-effort contact/city for the offline report's "To" block —
+        // a receipt itself never stores these (see `ReceiptModel`'s doc),
+        // so they're looked up from the cached Party list by name.
+        final party = _partyRepository.cachedPartyByName(item.partyName);
+
+        // Only a still-pending row's `entries` carry ids (never names —
+        // see `ReceiptRepository.cachedPaymentModeName`'s doc); resolve
+        // them against the offline payment-mode/bank catalogue.
+        final paymentLines = item.entries.map((e) {
+          final paymentModeId = e['payment_mode_id']?.toString() ?? '';
+          final bankId = e['bank_id']?.toString() ?? '';
+          return ReceiptPaymentLine(
+            paymentModeId: paymentModeId,
+            paymentModeName:
+                _receiptRepository.cachedPaymentModeName(paymentModeId),
+            bankId: bankId,
+            bankName: bankId.isEmpty
+                ? ''
+                : _receiptRepository.cachedBankName(bankId),
+            amount: double.tryParse(e['amount']?.toString() ?? '') ?? 0,
+          );
+        }).toList();
+
         return ReceiptModel(
           id: item.receiptId,
           receiptNumber: item.receiptNumber,
@@ -218,6 +247,10 @@ class ReceiptController extends GetxController {
           status: rowStatus,
           isPending: item.isPending,
           localId: item.localId,
+          narration: item.narration,
+          paymentLines: paymentLines,
+          mobileNumber: party?.mobileNumber ?? '',
+          city: party?.city ?? '',
         );
       }));
 
@@ -380,53 +413,69 @@ class ReceiptController extends GetxController {
 
   // ---- Print / download report PDF ------------------------------------------
 
-  /// A pending receipt has no server-side PDF yet — there's nothing to
-  /// open/download until it's actually synced.
-  bool _warnIfPending(ReceiptModel receipt) {
-    if (!receipt.isPending) return false;
-    if (receipt.status == DocStatus.cancelled) {
-      // Cancelled before it ever reached the server (see
-      // `ReceiptRepository.cancelPendingReceipt`) — this will never sync,
-      // so there's no report to fetch, ever, not just "not yet".
-      Get.snackbar('Nothing to show',
-          'This receipt was cancelled before it was ever sent to the server — there\'s no report for it.',
-          snackPosition: SnackPosition.BOTTOM);
-    } else {
-      Get.snackbar('Not synced yet',
-          'This receipt will be available to print/download once it syncs.',
-          snackPosition: SnackPosition.BOTTOM);
-    }
-    return true;
+  /// Builds the A5 receipt PDF entirely on-device (see
+  /// [ReceiptPdfBuilder]) — no network call, so this works the same
+  /// whether or not the device is online, and whether or not this
+  /// receipt has even been synced yet. See `ReceiptPdfBuilder`'s class
+  /// doc for the one real limitation: a *synced* receipt's Remarks/
+  /// Payment Mode detail isn't available offline (the server's list
+  /// endpoint never returns it), so those show as "—" on the report for
+  /// anything that isn't still in this device's pending-sync queue.
+  Future<Uint8List> _buildReceiptPdfBytes(ReceiptModel receipt) {
+    final party = _partyRepository.cachedPartyByName(receipt.partyName);
+    return ReceiptPdfBuilder.build(receipt: receipt, party: party);
   }
 
-  Future<void> _openReceiptReport(ReceiptModel receipt) async {
-    final uri = ApiEndpoints.receiptReport(receipt.id);
-    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!opened) {
-      Get.snackbar('Could not open', 'Unable to open the receipt report',
-          snackPosition: SnackPosition.BOTTOM);
-    }
-  }
-
+  /// Opens the native print/preview dialog for [receipt]'s A5 report.
   Future<void> printReceipt(ReceiptModel receipt) async {
-    if (_warnIfPending(receipt)) return;
-    await _openReceiptReport(receipt);
+    try {
+      final bytes = await _buildReceiptPdfBytes(receipt);
+      await Printing.layoutPdf(onLayout: (_) async => bytes);
+    } catch (e, st) {
+      debugPrint('printReceipt failed: $e\n$st');
+      _showPdfErrorDialog('Could not print', e, st);
+    }
   }
 
   Future<void> downloadReceipt(ReceiptModel receipt) async {
-    if (_warnIfPending(receipt)) return;
     try {
-      await PdfDownloader.download(
-        uri: ApiEndpoints.receiptReport(receipt.id),
-        fileName: receipt.receiptNumber,
+      final bytes = await _buildReceiptPdfBytes(receipt);
+      await PdfDownloader.saveBytes(
+        bytes: bytes,
+        fileName: receipt.receiptNumber.isEmpty
+            ? 'Receipt'
+            : receipt.receiptNumber,
       );
       Get.snackbar('Downloaded', 'Receipt report saved',
           snackPosition: SnackPosition.BOTTOM);
-    } catch (e) {
-      Get.snackbar(
-          'Could not download', 'Unable to download the receipt report',
-          snackPosition: SnackPosition.BOTTOM);
+    } catch (e, st) {
+      debugPrint('downloadReceipt failed: $e\n$st');
+      _showPdfErrorDialog('Could not download', e, st);
     }
+  }
+
+  /// See `EstimationController._showPdfErrorDialog` — a Snackbar
+  /// truncates long text, which can hide the actual exception behind a
+  /// generic message; this shows the full error (and stack trace,
+  /// selectable/copyable) in a scrollable dialog instead.
+  void _showPdfErrorDialog(String title, Object error, StackTrace st) {
+    Get.dialog(
+      AlertDialog(
+        title: Text(title),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: SelectableText('$error\n\n$st'),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Get.back(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 
   // ---- Add Receipt form -------------------------------------------------------

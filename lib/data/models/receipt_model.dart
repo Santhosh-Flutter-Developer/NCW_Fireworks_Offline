@@ -25,6 +25,27 @@ class ReceiptModel {
   /// Empty for a row that came from the synced server cache.
   final String localId;
 
+  /// The Remarks text shown on the printed/downloaded A5 report (see
+  /// `ReceiptPdfBuilder`). Only ever populated for a receipt still in the
+  /// pending-sync queue — `receipt_listing` (the endpoint backing a
+  /// synced row) never returns this field, and there's no "load one
+  /// receipt's full details" call to fetch it after the fact. Empty for
+  /// every synced row.
+  final String narration;
+
+  /// The Payment Mode/Bank/Amount breakdown shown on the report. Same
+  /// caveat as [narration]: only known for a still-pending receipt.
+  final List<ReceiptPaymentLine> paymentLines;
+
+  /// Best-effort contact details for the report's "To" block, filled in
+  /// from the cached Party list by name (see
+  /// `PartyRepository.cachedPartyByName`) when this row's own data
+  /// doesn't carry them — a pending receipt doesn't store these either
+  /// (the Add Receipt form never collects them), so they're always
+  /// sourced this way regardless of [isPending].
+  final String mobileNumber;
+  final String city;
+
   const ReceiptModel({
     required this.id,
     required this.receiptNumber,
@@ -35,6 +56,10 @@ class ReceiptModel {
     this.status = DocStatus.active,
     this.isPending = false,
     this.localId = '',
+    this.narration = '',
+    this.paymentLines = const [],
+    this.mobileNumber = '',
+    this.city = '',
   });
 }
 

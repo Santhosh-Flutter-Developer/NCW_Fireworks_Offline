@@ -132,6 +132,38 @@ class ReceiptRepository {
           ))
       .toList();
 
+  /// Looks up a payment mode's display name by id from the same cached
+  /// catalogue [cachedPaymentModes] reads — needed because a queued
+  /// receipt's `entries` (see [queueReceiptForSync]) only stores
+  /// `payment_mode_id`/`bank_id`, not the names, to keep that cached row
+  /// a plain id/amount record. Used by `ReceiptController` to rebuild the
+  /// Payment Mode line for the offline PDF (see `ReceiptPdfBuilder`).
+  /// Returns the id itself if the mode isn't found in the cache (e.g. an
+  /// older cache from before a Sync), so the report still shows *something*
+  /// rather than a blank.
+  String cachedPaymentModeName(String paymentModeId) {
+    if (paymentModeId.isEmpty) return '';
+    for (final m in _cache.getJsonList(CacheKeys.receiptPaymentModes)) {
+      if (m['id']?.toString() == paymentModeId) {
+        return m['name']?.toString() ?? paymentModeId;
+      }
+    }
+    return paymentModeId;
+  }
+
+  /// Same as [cachedPaymentModeName] but for a bank id, searched across
+  /// every payment mode's banks (not just one), since a queued entry only
+  /// has the bank id on its own.
+  String cachedBankName(String bankId) {
+    if (bankId.isEmpty) return '';
+    for (final m in _cache.getJsonList(CacheKeys.receiptBanks)) {
+      if (m['id']?.toString() == bankId) {
+        return m['name']?.toString() ?? bankId;
+      }
+    }
+    return bankId;
+  }
+
   /// Bootstraps the Add Receipt form: today's default receipt date plus
   /// the Payment Mode dropdown options. Only called now as a one-time
   /// backward-compat fallback and by [DataSyncService] to refresh
