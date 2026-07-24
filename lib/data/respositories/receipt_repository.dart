@@ -67,19 +67,21 @@ class ReceiptRepository {
   }
 
   /// Builds a *provisional* receipt number for a Receipt created
-  /// offline: `RE<seq>/<FY>` — matching the format already seen on
-  /// synced receipts (`RE019/26-27`, `RE020/26-27`, …), continuing the
-  /// highest sequence already used this financial year across every
-  /// cached tab (Active/Cancel) and anything still pending sync.
+  /// offline: `<billPrefix> - RE<seq>/<FY>` — matching the
+  /// `"AKB - RE025/26-27"` shape the real `receipt_data` payload uses,
+  /// continuing the highest sequence already used this financial year
+  /// across every cached tab (Active/Cancel) and anything still pending
+  /// sync, regardless of whether those numbers carry a prefix (older
+  /// synced rows on this device may not).
   ///
-  /// This is provisional, not reserved: unlike Estimate/Quotation,
-  /// `receipt_update` doesn't take a client-supplied number at all — the
-  /// server assigns the real `receipt_number` itself once this actually
-  /// syncs, and that real number is what ends up cached from then on.
-  /// This is purely so the pending row shown in the meantime looks like
-  /// a receipt number instead of showing the source estimate's own bill
-  /// number.
-  String nextReceiptNumber() {
+  /// This is provisional, not reserved: the server is the one that
+  /// actually creates the receipt once this syncs, so in principle it
+  /// could assign something else — but since `receipt_number` is now a
+  /// client-supplied field on `receipt_data` (see
+  /// `ReceiptRepository.syncPendingReceipts`), what's generated here is
+  /// what actually gets sent and, barring a rejection, what the receipt
+  /// keeps.
+  String nextReceiptNumber({required String billPrefix}) {
     final fy = _financialYearSuffix(DateTime.now());
     final pattern =
         RegExp('RE(\\d+)/${RegExp.escape(fy)}\$', caseSensitive: false);
@@ -101,7 +103,8 @@ class ReceiptRepository {
     scan(_cache.getJsonList(CacheKeys.receiptPending), 'receipt_number');
 
     final next = (maxSeq + 1).toString().padLeft(3, '0');
-    return 'RE$next/$fy';
+    final prefix = billPrefix.trim();
+    return prefix.isEmpty ? 'RE$next/$fy' : '$prefix - RE$next/$fy';
   }
 
   /// Payment Mode dropdown options for the Add Receipt form — refreshed
@@ -373,9 +376,10 @@ class ReceiptRepository {
   /// Draft tab), the same split the server's `cancelled` flag produces.
   /// Returns every cached row matching the given filters, unpaginated —
   /// merged with anything still sitting in the receipt pending-sync
-  /// queue, which (Receipts having no draft/cancel state of their own)
-  /// always shows under the Active tab, same as `EstimateRepository`'s
-  /// equivalent merge.
+  /// queue whose own `cancelled` flag matches: a fresh not-yet-synced
+  /// Receipt shows under Active, and one cancelled before it ever synced
+  /// (see [cancelPendingReceipt]) shows under Cancel — same tab split a
+  /// synced row would end up in either way.
   List<ReceiptListItem> _filterCachedReceipts({
     required String cancelled,
     required String filterFromDate,
@@ -386,14 +390,13 @@ class ReceiptRepository {
     final cacheKey =
         cancelled == '1' ? CacheKeys.receiptCancel : CacheKeys.receiptActive;
 
-    final pending = cancelled == '1'
-        ? const <ReceiptListItem>[]
-        : _cache
-            .getJsonList(CacheKeys.receiptPending)
-            .map(ReceiptListItem.fromPendingRow)
-            .toList()
-            .reversed
-            .toList();
+    final pending = _cache
+        .getJsonList(CacheKeys.receiptPending)
+        .where((row) => (row['cancelled']?.toString() ?? '0') == cancelled)
+        .map(ReceiptListItem.fromPendingRow)
+        .toList()
+        .reversed
+        .toList();
 
     final synced = _cache
         .getJsonList(cacheKey)
@@ -470,36 +473,11 @@ class ReceiptRepository {
     );
   }
 
-  /// Creates a new Billwise Payment receipt against [againstBillNumber].
-  /// [entries] becomes the three parallel `payment_mode_id` / `bank_id` /
-  /// `amount` arrays exactly as captured in the Postman example.
-  Future<ReceiptSaveResponseModel> saveReceipt({
-    required String creator,
-    required String receiptDate, // dd-MM-yyyy
-    required String againstBillNumber,
-    String deduction = '',
-    String narration = '',
-    required List<ReceiptPaymentEntry> entries,
-  }) async {
-    final body = <String, dynamic>{
-      'receipt_update': '1',
-      'creator': creator,
-      'receipt_date': receiptDate,
-      'against_bill_number': againstBillNumber,
-      'deduction': deduction,
-      'narration': narration,
-      'payment_mode_id': entries.map((e) => e.paymentModeId).toList(),
-      'bank_id': entries.map((e) => e.bankId).toList(),
-      'amount': entries.map((e) => e.amount).toList(),
-    };
-
-    final json = await _apiClient.postJson(ApiEndpoints.receipt, body: body);
-
-    final result = ReceiptSaveResponseModel.fromJson(json);
-    if (result.isSuccess) return result;
-
-    throw ApiRequestException(result.message);
-  }
+  // NOTE: `receipt.php`'s `receipt_update` action doesn't take a single
+  // receipt's fields at the top level — it always takes a `receipt_data`
+  // array, even for one row (see [syncPendingReceipts] below, which is
+  // the only thing that ever calls it). There's deliberately no
+  // single-receipt equivalent of this method.
 
   /// Queues a new Billwise Payment receipt on this device instead of
   /// calling `receipt.php` directly — the same offline-first shape every
@@ -512,9 +490,16 @@ class ReceiptRepository {
   /// `EstimationController.payReceipt`) — stored purely so
   /// [markEstimateLocallyConverted] and [reapplyPendingConversions] know
   /// which estimate row to flip `isConverted` on; it's never sent to
-  /// `receipt.php` itself, which only ever takes the bill *number*.
+  /// `receipt.php` itself.
+  ///
+  /// [editId] is what's actually sent to the server as `edit_id` in the
+  /// `receipt_data` batch (see [syncPendingReceipts]) — for a brand-new
+  /// receipt this is freshly generated and doubles as [localId], the
+  /// same one-id-does-both-jobs convention `EstimationController.save`
+  /// uses for a new estimate.
   Future<void> queueReceiptForSync({
     required String localId,
+    required String editId,
     required String estimateId,
     required String receiptNumber,
     required String billNumber,
@@ -530,6 +515,7 @@ class ReceiptRepository {
     final pending = _cache.getJsonList(CacheKeys.receiptPending);
     final row = <String, dynamic>{
       'local_id': localId,
+      'edit_id': editId,
       'estimate_id': estimateId,
       'receipt_number': receiptNumber,
       'bill_number': billNumber,
@@ -541,6 +527,11 @@ class ReceiptRepository {
       'narration': narration,
       'total_amount': totalAmount,
       'entries': entries.map((e) => e.toJson()).toList(),
+      // '0' = still needs to be sent to `receipt.php` on the next Sync;
+      // '1' = cancelled offline before it ever synced — see
+      // [cancelPendingReceipt] — so the next Sync just drops it from the
+      // queue instead of creating it only to immediately cancel it.
+      'cancelled': '0',
     };
     final updated = [
       ...pending.where((p) => p['local_id'] != localId),
@@ -558,24 +549,32 @@ class ReceiptRepository {
 
   /// Cancels a Receipt that's still only sitting in the pending-sync
   /// queue — entirely offline, since it was never sent to `receipt.php`
-  /// in the first place. Un-marks the source estimate's `receipt_id` too
-  /// (only if it's still exactly this queue entry's [localId] — never
-  /// clobbers a real server-assigned `receipt_id` that might have landed
-  /// there in the meantime), so its Receipt/Edit icons come back
-  /// immediately: the conversion never actually happened.
-  Future<void> removePendingReceipt(String localId) async {
+  /// in the first place. Unlike a synced receipt's cancel (which is a
+  /// real server-side soft-void), this just flags the queue entry itself
+  /// `cancelled` and leaves it in place, so it now shows under the
+  /// Cancel tab instead of Active — same as a real cancelled receipt
+  /// would — while [syncPendingReceipts] knows to simply drop it from
+  /// the queue on the next Sync rather than creating it server-side only
+  /// to cancel it right after.
+  ///
+  /// Also un-marks the source estimate's `receipt_id` (only if it's
+  /// still exactly this queue entry's [localId] — never clobbers a real
+  /// server-assigned `receipt_id` that might have landed there in the
+  /// meantime), so its Receipt/Edit icons come back immediately: the
+  /// conversion never actually happened.
+  Future<void> cancelPendingReceipt(String localId) async {
     final pending = _cache.getJsonList(CacheKeys.receiptPending);
     Map<String, dynamic>? row;
     for (final p in pending) {
       if (p['local_id'] == localId) {
         row = p;
+        row['cancelled'] = '1';
         break;
       }
     }
-    await _cache.putJsonList(
-      CacheKeys.receiptPending,
-      pending.where((p) => p['local_id'] != localId).toList(),
-    );
+    if (row != null) {
+      await _cache.putJsonList(CacheKeys.receiptPending, pending);
+    }
 
     final estimateId = row?['estimate_id']?.toString() ?? '';
     if (estimateId.isEmpty) return;
@@ -640,6 +639,7 @@ class ReceiptRepository {
   Future<void> reapplyPendingConversions() async {
     final pending = _cache.getJsonList(CacheKeys.receiptPending);
     for (final row in pending) {
+      if (row['cancelled']?.toString() == '1') continue;
       final estimateId = row['estimate_id']?.toString() ?? '';
       final localId = row['local_id']?.toString() ?? '';
       if (estimateId.isEmpty || localId.isEmpty) continue;
@@ -655,53 +655,87 @@ class ReceiptRepository {
   int get pendingReceiptCount =>
       _cache.getJsonList(CacheKeys.receiptPending).length;
 
-  /// Sends every queued Receipt to `receipt.php` one at a time — unlike
-  /// Estimate/Quotation's single-batch `_data: [...]` call, `receipt_update`
-  /// only ever takes one bill at a time (see [saveReceipt]). Only ever
-  /// called from the Sync button (via `DataSyncService`), and only while
-  /// online.
+  /// Sends every queued Receipt to `receipt.php` in a single batch call —
+  /// `receipt_update` / `receipt_data: [...]`, the same
+  /// one-call-for-everything shape Estimate/Quotation use (see
+  /// [EstimateRepository.syncPendingEstimates]) — never one call per
+  /// receipt. Each `receipt_data` entry carries its own `edit_id`,
+  /// `receipt_number`, `cancelled`, `receipt_date`, `against_bill_number`,
+  /// `deduction`, `narration`, and a `payment_mode_data` array of
+  /// `{payment_mode_id, bank_id, amount}` objects — not the flat parallel
+  /// `payment_mode_id[]`/`bank_id[]`/`amount[]` arrays a single-receipt
+  /// call would use. Only ever called from the Sync button (via
+  /// `DataSyncService`), and only while online.
   ///
-  /// Each entry is removed from the queue as soon as *that* entry
-  /// succeeds, so a later failure in the same batch never re-sends
-  /// receipts that already went through. If any entry fails, the
-  /// exception is rethrown after the loop so `DataSyncService` reports
-  /// the sync as failed and retries the remaining queue next time — but
-  /// whatever already succeeded stays synced.
+  /// A receipt cancelled before it ever synced (see
+  /// [cancelPendingReceipt]) is dropped from the queue first, without
+  /// being sent at all — same as `EstimationController.deleteEstimation`
+  /// does for an estimate cancelled before the server ever knew about it.
+  ///
+  /// On success, the whole queue is cleared — this is one atomic batch
+  /// call, not a per-row loop, so there's no partial success to track. On
+  /// failure (network error, or a business-rule rejection), the queue is
+  /// left completely untouched so nothing saved on the device is lost —
+  /// the next Sync attempt retries the same batch.
   Future<void> syncPendingReceipts({required String creator}) async {
-    final pending = _cache.getJsonList(CacheKeys.receiptPending);
+    var pending = _cache.getJsonList(CacheKeys.receiptPending);
     if (pending.isEmpty) return;
 
-    Object? firstError;
-    for (final row in pending) {
-      final localId = row['local_id']?.toString() ?? '';
-      try {
-        final rawEntries = row['entries'];
-        final entries = <ReceiptPaymentEntry>[
-          if (rawEntries is List)
-            for (final e in rawEntries)
-              if (e is Map) ReceiptPaymentEntry.fromJson(Map<String, dynamic>.from(e)),
-        ];
-
-        await saveReceipt(
-          creator: creator,
-          receiptDate: row['receipt_date']?.toString() ?? '',
-          againstBillNumber: row['bill_number']?.toString() ?? '',
-          deduction: row['deduction']?.toString() ?? '',
-          narration: row['narration']?.toString() ?? '',
-          entries: entries,
-        );
-
-        final stillPending = _cache.getJsonList(CacheKeys.receiptPending);
-        await _cache.putJsonList(
-          CacheKeys.receiptPending,
-          stillPending.where((p) => p['local_id'] != localId).toList(),
-        );
-      } catch (e) {
-        firstError ??= e;
-      }
+    final neverSyncedCancelled = pending
+        .where((r) => r['cancelled']?.toString() == '1')
+        .map((r) => r['local_id']?.toString() ?? '')
+        .toSet();
+    if (neverSyncedCancelled.isNotEmpty) {
+      pending = pending
+          .where((r) => !neverSyncedCancelled.contains(r['local_id']?.toString()))
+          .toList();
+      await _cache.putJsonList(CacheKeys.receiptPending, pending);
     }
 
-    if (firstError != null) throw firstError;
+    if (pending.isEmpty) return;
+
+    final receiptData = pending.map((row) {
+      final rawEntries = row['entries'];
+      final paymentModeData = <Map<String, dynamic>>[
+        if (rawEntries is List)
+          for (final e in rawEntries)
+            if (e is Map)
+              {
+                'payment_mode_id': e['payment_mode_id']?.toString() ?? '',
+                'bank_id': e['bank_id']?.toString() ?? '',
+                'amount': e['amount']?.toString() ?? '',
+              },
+      ];
+
+      return {
+        'edit_id': row['edit_id']?.toString().isNotEmpty == true
+            ? row['edit_id'].toString()
+            : row['local_id']?.toString() ?? '',
+        'receipt_number': row['receipt_number']?.toString() ?? '',
+        'cancelled': '0',
+        'receipt_date': row['receipt_date']?.toString() ?? '',
+        'against_bill_number': row['bill_number']?.toString() ?? '',
+        'deduction': row['deduction']?.toString() ?? '',
+        'narration': row['narration']?.toString() ?? '',
+        'payment_mode_data': paymentModeData,
+      };
+    }).toList();
+
+    final json = await _apiClient.postJson(
+      ApiEndpoints.receipt,
+      body: {
+        'receipt_update': '1',
+        'creator': creator,
+        'receipt_data': receiptData,
+      },
+    );
+
+    final result = ReceiptSaveResponseModel.fromJson(json);
+    if (!result.isSuccess) {
+      throw ApiRequestException(result.message);
+    }
+
+    await _cache.putJsonList(CacheKeys.receiptPending, []);
   }
 
   /// Deletes/cancels a receipt (soft-void — payment entries are reversed

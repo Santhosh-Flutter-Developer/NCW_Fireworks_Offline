@@ -222,7 +222,7 @@ class EstimateRepository {
     scan(_cache.getJsonList(CacheKeys.estimationPending));
 
     final next = (maxSeq + 1).toString().padLeft(3, '0');
-    return '${billPrefix}EST$next/$fy';
+    return '$billPrefix - EST$next/$fy';
   }
 
   /// Adds or updates one row in the on-device "pending estimate changes"

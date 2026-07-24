@@ -342,8 +342,8 @@ class ReceiptController extends GetxController {
   /// since the conversion never actually happened.
   Future<void> deleteReceipt(ReceiptModel receipt) async {
     if (receipt.isPending) {
-      await _receiptRepository.removePendingReceipt(receipt.localId);
-      Get.snackbar('Removed', 'This pending receipt was cancelled.',
+      await _receiptRepository.cancelPendingReceipt(receipt.localId);
+      Get.snackbar('Cancelled', 'Moved to the Cancel tab.',
           snackPosition: SnackPosition.BOTTOM);
       await loadReceipts();
       if (Get.isRegistered<EstimationController>()) {
@@ -372,9 +372,18 @@ class ReceiptController extends GetxController {
   /// open/download until it's actually synced.
   bool _warnIfPending(ReceiptModel receipt) {
     if (!receipt.isPending) return false;
-    Get.snackbar('Not synced yet',
-        'This receipt will be available to print/download once it syncs.',
-        snackPosition: SnackPosition.BOTTOM);
+    if (receipt.status == DocStatus.cancelled) {
+      // Cancelled before it ever reached the server (see
+      // `ReceiptRepository.cancelPendingReceipt`) — this will never sync,
+      // so there's no report to fetch, ever, not just "not yet".
+      Get.snackbar('Nothing to show',
+          'This receipt was cancelled before it was ever sent to the server — there\'s no report for it.',
+          snackPosition: SnackPosition.BOTTOM);
+    } else {
+      Get.snackbar('Not synced yet',
+          'This receipt will be available to print/download once it syncs.',
+          snackPosition: SnackPosition.BOTTOM);
+    }
     return true;
   }
 
@@ -565,7 +574,8 @@ class ReceiptController extends GetxController {
           snackPosition: SnackPosition.BOTTOM);
       return false;
     }
-    final creator = _sessionService.currentSession.value?.userId;
+    final session = _sessionService.currentSession.value;
+    final creator = session?.userId;
     if (creator == null || creator.isEmpty) {
       Get.snackbar('Session expired', 'Please log in again',
           snackPosition: SnackPosition.BOTTOM);
@@ -577,8 +587,14 @@ class ReceiptController extends GetxController {
       final localId = IdGenerator.generate();
       await _receiptRepository.queueReceiptForSync(
         localId: localId,
+        // A new receipt's edit_id is the same freshly generated id as
+        // localId — the same one-id-does-both-jobs convention
+        // EstimationController.save uses for a new estimate.
+        editId: localId,
         estimateId: _prefillEstimateId ?? '',
-        receiptNumber: _receiptRepository.nextReceiptNumber(),
+        receiptNumber: _receiptRepository.nextReceiptNumber(
+          billPrefix: session?.billPrefix ?? '',
+        ),
         billNumber: billFoundNumber.value,
         partyName: billParty.value.isEmpty ? 'Direct' : billParty.value,
         receiptDate: _apiDateFormat.format(receiptDate.value),

@@ -53,7 +53,15 @@ class _ReceiptListBody extends StatelessWidget {
       title: 'Receipt',
       actions: [
         SyncActionButton(
-          onSync: Get.find<DataSyncService>().syncReceipts,
+          // syncReceipts() only pushes/pulls the cache — it doesn't touch
+          // this screen's `receipts` list, so without reloading here the
+          // "Pending sync" badges would just sit there until something
+          // else (search, tab switch, re-entering the page) happened to
+          // call loadReceipts() next.
+          onSync: () async {
+            await Get.find<DataSyncService>().syncReceipts();
+            await controller.loadReceipts();
+          },
         ),
       ],
       // floatingActionButton: FloatingActionButton.extended(

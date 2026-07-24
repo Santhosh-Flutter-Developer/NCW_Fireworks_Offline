@@ -263,7 +263,7 @@ class QuotationRepository {
     scan(_cache.getJsonList(CacheKeys.quotationPending));
 
     final next = (maxSeq + 1).toString().padLeft(3, '0');
-    return '${billPrefix}QUT$next/$fy';
+    return '$billPrefix - QUT$next/$fy';
   }
 
   /// Sends every queued add/edit to `quotation.php` in a single batch
