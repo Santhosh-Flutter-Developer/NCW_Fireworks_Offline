@@ -606,7 +606,12 @@ class EstimationController extends GetxController {
           ? Get.find<ReceiptController>()
           : Get.put(ReceiptController());
       await receiptController.startCreate(
-          prefillBillNumber: estimation.estimationNo);
+          prefillBillNumber: estimation.estimationNo,
+          // Same id EstimationModel.id resolves to either way (synced
+          // row's server id, or a not-yet-synced row's own local_id) —
+          // lets the receipt form flip this exact estimate's
+          // `isConverted` the moment it's saved, offline included.
+          prefillEstimateId: estimation.serverEstimateId ?? estimation.id);
       Get.toNamed(AppRoutes.receiptForm);
     } finally {
       _isPayReceiptInFlight = false;

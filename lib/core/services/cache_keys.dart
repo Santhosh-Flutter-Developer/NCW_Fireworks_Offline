@@ -80,6 +80,29 @@ class CacheKeys {
   static const receiptCancel = 'receipt_cancel';
   static const receiptParties = 'receipt_parties';
 
+  /// Queue of Receipts (Bill Payments) created against an estimate on
+  /// this device that haven't been sent to `receipt.php` yet. Every
+  /// "convert Estimate to Receipt" made from the Estimate list — online
+  /// or offline — lands here first; only a manual tap of the Sync button
+  /// ever drains it (see [ReceiptRepository.queueReceiptForSync] /
+  /// [ReceiptRepository.syncPendingReceipts]). Each entry also carries
+  /// the source estimate's own id so the Estimate list can immediately
+  /// hide that estimate's Receipt/Edit icons — see
+  /// [ReceiptRepository.markEstimateLocallyConverted].
+  static const receiptPending = 'receipt_pending';
+
+  /// Payment Mode dropdown options (`{id, name}`) for the Add Receipt
+  /// form — synced once at login and via Sync, so opening the form never
+  /// needs the network.
+  static const receiptPaymentModes = 'receipt_payment_modes';
+
+  /// Bank dropdown options per payment mode (`{payment_mode_id, id,
+  /// name}`) for the Add Receipt form's Bank field — cached once per
+  /// payment mode at Sync time so picking a bank offline never needs a
+  /// live `selected_bank_payment_mode` call.
+  static const receiptBanks = 'receipt_banks';
+
+
   /// ISO-8601 timestamp string of the last time [DataSyncService.syncAll]
   /// completed (even if some individual steps failed).
   static const lastSyncedAt = 'meta_last_synced_at';

@@ -207,6 +207,11 @@ class EstimateListItem {
       estimateDate: row['estimate_date']?.toString() ?? '',
       agentNameMobileCity: row['agent_name']?.toString() ?? '',
       partyNameMobileCity: row['party_name']?.toString() ?? '',
+      // Set by [ReceiptRepository.markEstimateLocallyConverted] the
+      // moment a Receipt is queued against this estimate (even before
+      // either side has actually synced), so `isConverted` flips — and
+      // the Receipt/Edit icons hide — immediately, offline included.
+      receiptId: row['receipt_id']?.toString() ?? '',
       totalQuantity: products
           .fold<int>(0, (sum, p) => sum + (int.tryParse(p.quantity) ?? 0))
           .toString(),

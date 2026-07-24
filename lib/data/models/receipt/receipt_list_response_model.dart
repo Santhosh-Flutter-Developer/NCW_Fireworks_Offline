@@ -1,7 +1,11 @@
 import '../../../core/network/api_exception.dart';
 import 'id_name.dart';
 
-/// One row from `receipt_list` in a `receipt_listing` response.
+/// One row from `receipt_list` in a `receipt_listing` response — or,
+/// when [isPending] is true, one row built from the on-device
+/// pending-sync queue ([CacheKeys.receiptPending]) instead: a Receipt
+/// created against an estimate on this device that hasn't been sent to
+/// `receipt.php` yet.
 class ReceiptListItem {
   final String receiptId;
   final String receiptNumber;
@@ -10,6 +14,14 @@ class ReceiptListItem {
   final String partyName;
   final double totalAmount;
 
+  /// True for a row sourced from the pending-sync queue rather than the
+  /// synced cache — drives the "Pending sync" badge on the list, same as
+  /// `EstimateListItem.isPending`.
+  final bool isPending;
+
+  /// For a pending row, the queue entry's own id. Empty for a synced row.
+  final String localId;
+
   const ReceiptListItem({
     required this.receiptId,
     required this.receiptNumber,
@@ -17,6 +29,8 @@ class ReceiptListItem {
     required this.agentName,
     required this.partyName,
     required this.totalAmount,
+    this.isPending = false,
+    this.localId = '',
   });
 
   factory ReceiptListItem.fromJson(Map<String, dynamic> json) {
@@ -27,6 +41,26 @@ class ReceiptListItem {
       agentName: json['agent_name']?.toString() ?? '',
       partyName: json['party_name']?.toString() ?? '',
       totalAmount: readNum(json['total_amount']),
+    );
+  }
+
+  /// Builds a row from one entry of the pending-sync queue (the same
+  /// shape [ReceiptRepository.queueReceiptForSync] writes). `receiptId`
+  /// stays empty — the server assigns the real one once this is actually
+  /// synced — but `receiptNumber` is the provisional
+  /// `ReceiptRepository.nextReceiptNumber()` value generated at creation,
+  /// so this shows in the same `RE0xx/FY` shape a synced row would,
+  /// rather than the source estimate's own bill number.
+  factory ReceiptListItem.fromPendingRow(Map<String, dynamic> row) {
+    return ReceiptListItem(
+      receiptId: '',
+      receiptNumber: row['receipt_number']?.toString() ?? '',
+      receiptDate: row['receipt_date_iso']?.toString() ?? '',
+      agentName: row['agent_name']?.toString() ?? '',
+      partyName: row['party_name']?.toString() ?? '',
+      totalAmount: readNum(row['total_amount']),
+      isPending: true,
+      localId: row['local_id']?.toString() ?? '',
     );
   }
 }

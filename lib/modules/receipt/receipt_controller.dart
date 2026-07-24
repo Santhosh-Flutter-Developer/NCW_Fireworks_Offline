@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/constants/api_endpoints.dart';
 import '../../core/network/api_exception.dart';
 import '../../core/services/session_service.dart';
+import '../../core/utils/id_generator.dart';
 import '../../data/models/billing_item_model.dart';
 import '../../data/models/party_model.dart';
 import '../../data/models/receipt/id_name.dart';
@@ -90,6 +91,15 @@ class ReceiptController extends GetxController {
   final billParty = ''.obs;
   final billTotalAmount = 0.0.obs;
   bool get hasBillLoaded => billFoundNumber.value.isNotEmpty;
+
+  /// The source estimate's own id, set by [startCreate] whenever this
+  /// form was opened via the Estimate list's Receipt icon
+  /// (`EstimationController.payReceipt`) — the only way the Bill Number
+  /// field is ever populated, since it's read-only. Carried through to
+  /// [submitReceipt] so the queued receipt can flip that estimate's
+  /// `isConverted` immediately, offline included (see
+  /// `ReceiptRepository.markEstimateLocallyConverted`).
+  String? _prefillEstimateId;
 
   // Current "Add To Bill" row-in-progress.
   final Rx<IdName?> selectedPaymentMode = Rx<IdName?>(null);
@@ -206,6 +216,8 @@ class ReceiptController extends GetxController {
           partyName: item.partyName,
           totalAmount: item.totalAmount,
           status: rowStatus,
+          isPending: item.isPending,
+          localId: item.localId,
         );
       }));
 
@@ -321,7 +333,24 @@ class ReceiptController extends GetxController {
 
   // ---- Delete ---------------------------------------------------------------
 
+  /// A synced receipt is cancelled on the server (soft-void — payment
+  /// entries reversed server-side, matches the old behaviour exactly). A
+  /// receipt still sitting in the pending-sync queue was never sent to
+  /// the server at all, so "delete" here just drops it from the queue —
+  /// entirely offline — and un-marks the source estimate's
+  /// `isConverted`, so its Receipt/Edit icons come back immediately,
+  /// since the conversion never actually happened.
   Future<void> deleteReceipt(ReceiptModel receipt) async {
+    if (receipt.isPending) {
+      await _receiptRepository.removePendingReceipt(receipt.localId);
+      Get.snackbar('Removed', 'This pending receipt was cancelled.',
+          snackPosition: SnackPosition.BOTTOM);
+      await loadReceipts();
+      if (Get.isRegistered<EstimationController>()) {
+        unawaited(Get.find<EstimationController>().loadEstimates());
+      }
+      return;
+    }
     try {
       final result =
           await _receiptRepository.deleteReceipt(receiptId: receipt.id);
@@ -339,6 +368,16 @@ class ReceiptController extends GetxController {
 
   // ---- Print / download report PDF ------------------------------------------
 
+  /// A pending receipt has no server-side PDF yet — there's nothing to
+  /// open/download until it's actually synced.
+  bool _warnIfPending(ReceiptModel receipt) {
+    if (!receipt.isPending) return false;
+    Get.snackbar('Not synced yet',
+        'This receipt will be available to print/download once it syncs.',
+        snackPosition: SnackPosition.BOTTOM);
+    return true;
+  }
+
   Future<void> _openReceiptReport(ReceiptModel receipt) async {
     final uri = ApiEndpoints.receiptReport(receipt.id);
     final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -348,21 +387,26 @@ class ReceiptController extends GetxController {
     }
   }
 
-  Future<void> printReceipt(ReceiptModel receipt) =>
-      _openReceiptReport(receipt);
- Future<void> downloadReceipt(ReceiptModel receipt) async {
-  try {
-    await PdfDownloader.download(
-      uri: ApiEndpoints.receiptReport(receipt.id),
-      fileName: receipt.receiptNumber,
-    );
-    Get.snackbar('Downloaded', 'Receipt report saved',
-        snackPosition: SnackPosition.BOTTOM);
-  } catch (e) {
-    Get.snackbar('Could not download', 'Unable to download the receipt report',
-        snackPosition: SnackPosition.BOTTOM);
+  Future<void> printReceipt(ReceiptModel receipt) async {
+    if (_warnIfPending(receipt)) return;
+    await _openReceiptReport(receipt);
   }
-}
+
+  Future<void> downloadReceipt(ReceiptModel receipt) async {
+    if (_warnIfPending(receipt)) return;
+    try {
+      await PdfDownloader.download(
+        uri: ApiEndpoints.receiptReport(receipt.id),
+        fileName: receipt.receiptNumber,
+      );
+      Get.snackbar('Downloaded', 'Receipt report saved',
+          snackPosition: SnackPosition.BOTTOM);
+    } catch (e) {
+      Get.snackbar(
+          'Could not download', 'Unable to download the receipt report',
+          snackPosition: SnackPosition.BOTTOM);
+    }
+  }
 
   // ---- Add Receipt form -------------------------------------------------------
 
@@ -383,34 +427,37 @@ class ReceiptController extends GetxController {
     paymentLines.clear();
   }
 
-  Future<void> startCreate({String? prefillBillNumber}) async {
+  /// Opens the Add Receipt form. When called from the Estimate list's
+  /// Receipt icon (`EstimationController.payReceipt`), [prefillEstimateId]
+  /// is the source estimate's own id — the only way this form is ever
+  /// populated, since Bill Number is read-only. Reads the Payment Mode
+  /// dropdown straight from the offline cache (synced at login/Sync), so
+  /// opening this form never needs the network.
+  Future<void> startCreate({
+    String? prefillBillNumber,
+    String? prefillEstimateId,
+  }) async {
     _resetForm();
+    _prefillEstimateId = prefillEstimateId;
     if (prefillBillNumber != null && prefillBillNumber.isNotEmpty) {
-    billNumberCtrl.value.text = prefillBillNumber;
-    billNumberCtrl.refresh();
-  }
-    isLoadingForm.value = true;
-    try {
-      final result = await _receiptRepository.getFormInitData();
-      paymentModeOptions.assignAll(result.paymentModes);
-      final serverDate = _tryParse(_apiDateFormat, result.receiptDate);
-      if (serverDate != null) receiptDate.value = serverDate;
-    } on ApiRequestException catch (e) {
-      Get.snackbar('Could not load form', e.message,
-          snackPosition: SnackPosition.BOTTOM);
-    } on ApiException catch (e) {
-      Get.snackbar('Could not load form', e.message,
-          snackPosition: SnackPosition.BOTTOM);
-    } finally {
-      isLoadingForm.value = false;
+      billNumberCtrl.value.text = prefillBillNumber;
+      billNumberCtrl.refresh();
     }
-     if (prefillBillNumber != null && prefillBillNumber.isNotEmpty) {
-    await lookupBillNumber();
-  }
+    receiptDate.value = DateTime.now();
+    paymentModeOptions.assignAll(_receiptRepository.cachedPaymentModes());
+    if (prefillBillNumber != null && prefillBillNumber.isNotEmpty) {
+      await lookupBillNumber();
+    }
   }
 
-  /// Looks up the bill typed into "Bill Number" — mirrors the web app
-  /// triggering this on blur/enter rather than on every keystroke.
+  /// Looks up the bill shown in "Bill Number" — entirely offline, from
+  /// the shared estimate cache (see
+  /// `ReceiptRepository.lookupBillByEstimateId`), since that field is
+  /// read-only and only ever prefilled from the Estimate list with the
+  /// source estimate's own id already in hand. Falls back to the legacy
+  /// live `lookupBill` API by bill number only if no estimate id was
+  /// carried through (shouldn't normally happen given the field is
+  /// read-only, but keeps old call sites working).
   Future<void> lookupBillNumber() async {
     final billNo = billNumberCtrl.value.text.trim();
     billLookupError.value = null;
@@ -422,7 +469,10 @@ class ReceiptController extends GetxController {
     }
     isLookingUpBill.value = true;
     try {
-      final result = await _receiptRepository.lookupBill(billNo);
+      final estimateId = _prefillEstimateId;
+      final result = estimateId != null && estimateId.isNotEmpty
+          ? _receiptRepository.lookupBillByEstimateId(estimateId)
+          : await _receiptRepository.lookupBill(billNo);
       billFoundNumber.value = result.estimateNumber;
       billParty.value = result.party;
       billTotalAmount.value = result.totalAmount;
@@ -438,8 +488,13 @@ class ReceiptController extends GetxController {
     }
   }
 
-  /// Loads the Bank dropdown for a chosen payment mode. An empty result
-  /// means this mode is cash-style — no Bank field needed for this row.
+  /// Loads the Bank dropdown for a chosen payment mode — entirely offline
+  /// from the payment-mode → bank catalogue cached at login/Sync. An
+  /// empty result means this mode is cash-style — no Bank field needed
+  /// for this row. Account Balance is no longer looked up here — that
+  /// was the last live network call left in the Add Receipt form; there's
+  /// no offline source for it, so it's simply not shown anymore rather
+  /// than requiring the network.
   Future<void> selectPaymentMode(IdName? mode) async {
     selectedPaymentMode.value = mode;
     selectedBank.value = null;
@@ -447,41 +502,11 @@ class ReceiptController extends GetxController {
     accountBalance.value = null;
     if (mode == null) return;
 
-    isLoadingBanks.value = true;
-    try {
-      final result = await _receiptRepository.getBanksForPaymentMode(mode.id);
-      bankOptions.assignAll(result.banks);
-      if (result.banks.isEmpty) {
-        // Cash-style mode — balance is keyed directly off the payment mode.
-        await _loadBalance(mode.id);
-      }
-    } on ApiRequestException catch (e) {
-      Get.snackbar('Could not load banks', e.message,
-          snackPosition: SnackPosition.BOTTOM);
-    } on ApiException catch (e) {
-      Get.snackbar('Could not load banks', e.message,
-          snackPosition: SnackPosition.BOTTOM);
-    } finally {
-      isLoadingBanks.value = false;
-    }
+    bankOptions.assignAll(_receiptRepository.cachedBanksForPaymentMode(mode.id));
   }
 
   Future<void> selectBank(IdName? bank) async {
     selectedBank.value = bank;
-    if (bank != null) await _loadBalance(bank.id);
-  }
-
-  Future<void> _loadBalance(String accountId) async {
-    isLoadingBalance.value = true;
-    accountBalance.value = null;
-    try {
-      final result = await _receiptRepository.getAccountBalance(accountId);
-      accountBalance.value = result.balanceAmount;
-    } on ApiException {
-      accountBalance.value = null;
-    } finally {
-      isLoadingBalance.value = false;
-    }
   }
 
   /// Appends the in-progress Payment Mode/Bank/Amount row to the table —
@@ -549,12 +574,18 @@ class ReceiptController extends GetxController {
 
     isSaving.value = true;
     try {
-      final result = await _receiptRepository.saveReceipt(
-        creator: creator,
+      final localId = IdGenerator.generate();
+      await _receiptRepository.queueReceiptForSync(
+        localId: localId,
+        estimateId: _prefillEstimateId ?? '',
+        receiptNumber: _receiptRepository.nextReceiptNumber(),
+        billNumber: billFoundNumber.value,
+        partyName: billParty.value.isEmpty ? 'Direct' : billParty.value,
         receiptDate: _apiDateFormat.format(receiptDate.value),
-        againstBillNumber: billFoundNumber.value,
+        receiptDateIso: _serverStoredDateFormat.format(receiptDate.value),
         deduction: deductionCtrl.text.trim(),
         narration: narrationCtrl.text.trim(),
+        totalAmount: billTotalAmount.value,
         entries: paymentLines
             .map((l) => ReceiptPaymentEntry(
                   paymentModeId: l.paymentModeId,
@@ -564,21 +595,20 @@ class ReceiptController extends GetxController {
             .toList(),
       );
       Get.back();
-      Get.snackbar('Saved', result.message,
+      Get.snackbar(
+          'Saved offline',
+          'This receipt will be sent to the server the next time you Sync.',
           snackPosition: SnackPosition.BOTTOM);
       currentPage.value = 1;
-      Future.delayed(const Duration(seconds: 1), () async {
-        await loadReceipts();
-        if (Get.isRegistered<EstimationController>()) {
-          unawaited(Get.find<EstimationController>().loadEstimates());
-        }
-        
-      });
+      // Refresh right away so the new pending row shows up in this
+      // session's Receipt list, and the Estimate list immediately hides
+      // this estimate's Receipt/Edit icons (its cached `receipt_id` was
+      // just stamped by `queueReceiptForSync`).
+      await loadReceipts();
+      if (Get.isRegistered<EstimationController>()) {
+        unawaited(Get.find<EstimationController>().loadEstimates());
+      }
       return true;
-    } on ApiRequestException catch (e) {
-      Get.snackbar('Could not save', e.message,
-          snackPosition: SnackPosition.BOTTOM);
-      return false;
     } on ApiException catch (e) {
       Get.snackbar('Could not save', e.message,
           snackPosition: SnackPosition.BOTTOM);

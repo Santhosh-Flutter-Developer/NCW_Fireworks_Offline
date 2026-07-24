@@ -15,6 +15,16 @@ class ReceiptModel {
   /// `receipt_listing` rows themselves don't carry a per-row status).
   final DocStatus status;
 
+  /// True when this row was built from the on-device pending-sync queue
+  /// — a Receipt created against an estimate on this device that hasn't
+  /// been sent to `receipt.php` yet. Drives the "Pending sync" badge on
+  /// the list, same as `EstimationModel.isPending`.
+  final bool isPending;
+
+  /// The pending-sync queue entry's own id, when [isPending] is true.
+  /// Empty for a row that came from the synced server cache.
+  final String localId;
+
   const ReceiptModel({
     required this.id,
     required this.receiptNumber,
@@ -23,6 +33,8 @@ class ReceiptModel {
     required this.partyName,
     required this.totalAmount,
     this.status = DocStatus.active,
+    this.isPending = false,
+    this.localId = '',
   });
 }
 

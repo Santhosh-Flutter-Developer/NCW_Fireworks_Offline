@@ -519,6 +519,23 @@ class _ReceiptTile extends StatelessWidget {
                 child: Text(receipt.receiptNumber,
                     style: AppTextStyles.bodyStrong),
               ),
+              if (receipt.isPending)
+                Container(
+                  margin: const EdgeInsets.only(right: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppColors.skyBlue.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    'Pending sync',
+                    style: AppTextStyles.caption.copyWith(
+                      color: AppColors.skyBlue,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
               StatusBadge(status: receipt.status),
             ],
           ),
@@ -563,11 +580,14 @@ class _ActionIcons extends StatelessWidget {
   bool get _isCancelled => receipt.status == DocStatus.cancelled;
 
   Future<void> _confirmDelete(BuildContext context) async {
+    final isPending = receipt.isPending;
     final confirmed = await Get.dialog<bool>(
       AlertDialog(
         backgroundColor: AppColors.surfaceElevated,
-        title: const Text('Delete Receipt'),
-        content: const Text('Are you surely want to delete this receipt?'),
+        title: Text(isPending ? 'Cancel Receipt' : 'Delete Receipt'),
+        content: Text(isPending
+            ? 'This receipt hasn\'t synced yet. Cancel it and un-hide the estimate\'s Receipt/Edit options?'
+            : 'Are you surely want to delete this receipt?'),
         actions: [
           TextButton(
             onPressed: () => Get.back(result: false),
@@ -575,7 +595,7 @@ class _ActionIcons extends StatelessWidget {
           ),
           TextButton(
             onPressed: () => Get.back(result: true),
-            child: const Text('Delete'),
+            child: Text(isPending ? 'Cancel Receipt' : 'Delete'),
           ),
         ],
       ),
@@ -604,7 +624,7 @@ class _ActionIcons extends StatelessWidget {
         ),
          if (!_isCancelled)
         IconButton(
-          tooltip: 'Delete',
+          tooltip: receipt.isPending ? 'Cancel' : 'Delete',
           visualDensity: VisualDensity.compact,
           onPressed: () => _confirmDelete(context),
           icon:

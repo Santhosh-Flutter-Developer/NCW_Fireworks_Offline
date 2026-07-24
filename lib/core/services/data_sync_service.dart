@@ -440,6 +440,14 @@ class DataSyncService extends GetxService {
     await _cache.putJsonList(
         CacheKeys.estimationParties, parties.values.toList());
 
+    // The fresh pull above only reflects a receipt that's itself already
+    // synced — an estimate paid offline whose receipt hasn't gone
+    // through yet would otherwise have its locally-set `receipt_id`
+    // wiped back to empty here, briefly un-hiding its Receipt/Edit icons
+    // until the next Sync. Re-stamp anything still in the receipt
+    // pending-sync queue right away.
+    await _receiptRepository.reapplyPendingConversions();
+
     await _syncEstimateCatalogue();
   }
 
@@ -496,6 +504,18 @@ class DataSyncService extends GetxService {
   }
 
   Future<void> _syncReceipts() async {
+    final creator = _sessionService.currentSession.value?.userId;
+    if (creator != null && creator.isNotEmpty) {
+      // Sends every Receipt created offline against an estimate to
+      // `receipt.php`, one at a time (see
+      // `ReceiptRepository.syncPendingReceipts` for why — no batch
+      // endpoint like Estimate/Quotation have). A failure here is
+      // reported by `_runStep`/`_syncOne` like any other step, but
+      // whatever already went through in the loop stays synced either
+      // way.
+      await _receiptRepository.syncPendingReceipts(creator: creator);
+    }
+
     final parties = <String, Map<String, dynamic>>{};
 
     Future<void> syncTab(
@@ -528,5 +548,40 @@ class DataSyncService extends GetxService {
     await syncTab(CacheKeys.receiptCancel, 'Cancelled', cancelled: '1');
     await _cache.putJsonList(
         CacheKeys.receiptParties, parties.values.toList());
+
+    // In case this step ran before `_syncEstimations` did (e.g. the user
+    // tapped Sync from the Receipt screen, running only this step) —
+    // keep any estimate whose receipt hasn't synced yet marked converted.
+    await _receiptRepository.reapplyPendingConversions();
+
+    await _syncReceiptCatalogue();
+  }
+
+  /// Refreshes the Payment Mode dropdown and, per mode, its linked Bank
+  /// dropdown — cached so the Add Receipt form (`ReceiptController`)
+  /// never needs the network. Mirrors [_syncEstimateCatalogue].
+  Future<void> _syncReceiptCatalogue() async {
+    _announce('Syncing receipt payment modes');
+    final init = await _receiptRepository.getFormInitData();
+    await _cache.putJsonList(
+      CacheKeys.receiptPaymentModes,
+      init.paymentModes.map((m) => {'id': m.id, 'name': m.name}).toList(),
+    );
+
+    final allBanks = <Map<String, dynamic>>[];
+    for (final mode in init.paymentModes) {
+      try {
+        final result = await _receiptRepository.getBanksForPaymentMode(mode.id);
+        allBanks.addAll(result.banks.map((b) => {
+              'payment_mode_id': mode.id,
+              'id': b.id,
+              'name': b.name,
+            }));
+      } catch (_) {
+        // Keep whatever banks were already cached for this mode rather
+        // than failing the whole sync over one mode's bank lookup.
+      }
+    }
+    await _cache.putJsonList(CacheKeys.receiptBanks, allBanks);
   }
 }
