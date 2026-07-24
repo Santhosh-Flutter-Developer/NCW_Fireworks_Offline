@@ -127,7 +127,15 @@ class QuotationPdfBuilder {
         ),
         pw.SizedBox(height: 4),
         pw.Row(
-          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+          // No crossAxisAlignment.stretch — with an unbounded incoming
+          // height (this Row sits inside _s()'s wrapping, which is
+          // itself measured with unbounded height on the first pass),
+          // `stretch` forces children to minHeight=maxHeight=Infinity
+          // (confirmed by reading Flex.layout() directly), which is
+          // exactly what threw "Widget won't fit ... height (Infinity)".
+          // The two boxes may end up very slightly different heights
+          // instead — a minor, acceptable trade-off for not crashing.
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
             pw.Expanded(
               child: pw.Container(
@@ -297,7 +305,8 @@ class QuotationPdfBuilder {
         ),
       ),
       child: pw.Row(
-        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+        // No stretch — see the note by the Bill-To/Meta row for why.
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
           cell('S.No', _colSNo),
           cell('Product', _colProduct),
@@ -323,7 +332,8 @@ class QuotationPdfBuilder {
         color: isEven ? null : PdfColors.grey100,
       ),
       child: pw.Row(
-        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+        // No stretch — see the note by the Bill-To/Meta row for why.
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
           _gridCell(
             pw.Text('$index',
